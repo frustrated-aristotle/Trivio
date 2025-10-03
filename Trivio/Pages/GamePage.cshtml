@@ -15,6 +15,9 @@
 		let role = (sessionStorage.getItem('trivio_role') || "@Model.Role").toLowerCase();
 		let username = sessionStorage.getItem('trivio_username') || "@Model.Username";
 		
+		let guessInput = document.getElementById('guessInput');
+		guessInput.focus();
+
 		connection.start()
 		.then(function(){
 			return connection.invoke('JoinRoom', parseInt(code), role, username);
@@ -42,6 +45,135 @@
 			})
 		});
 
+		// Round start: show consonants and focus input
+		connection.on("RoundStarted", function(payload){
+			const roundArea = document.getElementById('roundArea');
+			if (roundArea) { roundArea.style.display = 'block'; }
+			
+			// Display consonants
+			const consonantsEl = document.getElementById('consonantsDisplay');
+			if (consonantsEl && payload.consonants) {
+				const consonantsHtml = payload.consonants.map(c => `<span class="badge bg-primary me-2 fs-4">${c.toUpperCase()}</span>`).join('');
+				consonantsEl.innerHTML = consonantsHtml;
+			}
+			
+			// Update game progress
+			if (payload.roundNumber) {
+				const progressEl = document.getElementById('gameProgress');
+				if (progressEl) {
+					progressEl.innerText = `Round ${payload.roundNumber} of 10`;
+				}
+			}
+			
+			// Update instructions
+			const instructionsEl = document.getElementById('gameInstructions');
+			if (instructionsEl && payload.message) {
+				instructionsEl.innerText = payload.message;
+			}
+			
+			const gi = document.getElementById('guessInput');
+			if (gi) { gi.value = ''; gi.focus(); }
+		});
+
+		// Handle guess results
+		connection.on("GuessResult", function(payload) {
+			const maxNotifications = 5;
+			const notificationDuration = 3000; // 3 saniye
+			
+			let containerEl = document.getElementById('notificationContainer');
+			if (!containerEl) {
+				containerEl = document.createElement('div');
+				containerEl.id = 'notificationContainer';
+				document.body.appendChild(containerEl);
+			}
+
+			const alertClass = payload.success ? 'alert-success' : 'alert-danger';
+			const notificationEl = document.createElement('div');
+			notificationEl.className = `alert ${alertClass} notification-item`;
+			notificationEl.innerHTML = payload.message;
+
+			containerEl.prepend(notificationEl); 
+
+			const notifications = containerEl.getElementsByClassName('notification-item');
+			if (notifications.length > maxNotifications) {
+				containerEl.removeChild(notifications[notifications.length - 1]);
+			}
+
+			setTimeout(() => {
+				if (containerEl.contains(notificationEl)) {
+					notificationEl.remove();
+				}
+			}, notificationDuration);
+		});
+
+
+		// Handle game completion
+		connection.on("GameCompleted", function(payload){
+			if (payload.gameCompleted) {
+				// Show completion modal
+				const modal = document.getElementById('gameCompletionModal');
+				if (modal) {
+					const modalBody = document.getElementById('modalBody');
+					if (modalBody) {
+						modalBody.innerHTML = `
+							<div class="text-center">
+								<h3 class="text-success mb-3">🎉 Congratulations! 🎉</h3>
+								<p class="fs-5 mb-3">${payload.message}</p>
+								<div class="row">
+									<div class="col-md-6">
+										<div class="card bg-light">
+											<div class="card-body">
+												<h5 class="card-title">📊 Game Statistics</h5>
+												<p class="card-text">
+													<strong>Total Rounds:</strong> ${payload.totalRounds}<br>
+													<strong>Game Type:</strong> Consonant Challenge<br>
+													<strong>Language:</strong> Turkish
+												</p>
+											</div>
+										</div>
+									</div>
+									<div class="col-md-6">
+										<div class="card bg-light">
+											<div class="card-body">
+												<h5 class="card-title">🏆 Achievement</h5>
+												<p class="card-text">
+													You successfully completed all 10 rounds of the consonant challenge! 
+													Well done on your Turkish vocabulary skills!
+												</p>
+											</div>
+										</div>
+									</div>
+								</div>
+							</div>
+						`;
+					}
+					const bootstrapModal = new bootstrap.Modal(modal);
+					bootstrapModal.show();
+				}
+			} else {
+				// Legacy completion (for other scenarios)
+				const roundArea = document.getElementById('roundArea');
+				if (roundArea) {
+					roundArea.innerHTML = `
+						<div class="alert alert-info text-center">
+							<h4>🎉 Game Completed! 🎉</h4>
+							<p>${payload.message}</p>
+							<button class="btn btn-primary" onclick="location.reload()">Play Again</button>
+						</div>
+					`;
+				}
+			}
+		});
+
+
+		//events
+		//on enter or spacebar hit, submit the guess with value, room code and username
+		document.addEventListener('keydown', function(event) {
+				if(event.key === 'Spacebar' || event.key === 'Enter')
+				{
+					submitGuess(guessInput.value);
+				}
+		});
 		function addUserToDom(user)
 		{
 			let username = user.username;
@@ -68,6 +200,19 @@
 			
 			listElement.appendChild(listItem);
 		};
+
+		function startTheGame(isAdmin)
+		{
+			// Only owner can start on server; client just requests
+			connection.invoke('StartTheGame', parseInt(code), 1)
+				.catch(err => console.error(err));
+		}
+		function submitGuess(guess)
+		{
+			connection.invoke('SubmitGuess', {guess: guess, code: code, username: username});
+			guessInput.value = '';
+			guessInput.focus();
+		}
 	</script>
 }
 <div class="container">
@@ -111,5 +256,38 @@
 			</div>
 
 		</div>
+		<div id="roundArea" style="display:none;">
+			<div class="mb-3">
+				<h5 id="gameProgress" class="text-muted">Round 1 of 10</h5>
+			</div>
+			<div class="mb-3">
+				<h6 id="gameInstructions" class="text-info">Use only these consonants:</h6>
+				<div id="consonantsDisplay" class="mb-3">
+					<!-- Consonants will be displayed here -->
+				</div>
+			</div>
+			<input type="text" id="guessInput" placeholder="Type a word using only the consonants above..." class="form-control mb-3">
+			<div id="messageArea"></div>
+		</div>
+
+		<!-- Game Completion Modal -->
+		<div class="modal fade" id="gameCompletionModal" tabindex="-1" aria-labelledby="gameCompletionModalLabel" aria-hidden="true">
+			<div class="modal-dialog modal-lg">
+				<div class="modal-content">
+					<div class="modal-header bg-success text-white">
+						<h5 class="modal-title" id="gameCompletionModalLabel">Game Completed!</h5>
+						<button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+					</div>
+					<div class="modal-body" id="modalBody">
+						<!-- Modal content will be populated by JavaScript -->
+					</div>
+					<div class="modal-footer">
+						<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+						<button type="button" class="btn btn-primary" onclick="location.reload()">Play Again</button>
+					</div>
+				</div>
+			</div>
+		</div>
 	</div>
 </div>
+

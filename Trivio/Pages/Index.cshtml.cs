@@ -32,9 +32,9 @@ namespace Trivio.Pages
             // Generate code on server to keep flow consistent and tamper-proof
             var random = new Random();
             var code = random.Next(10000, 99999);
-            // Create room immediately in registry (owner connection id will be updated on hub join)
+            // Create room without binding an owner connection yet; owner set on first JoinRoom
             Enum.TryParse<Roles>(role, true, out var ownerRole);
-            _roomRegistry.CreateRoom(code, ownerConnectionId: Guid.NewGuid().ToString(), ownerUsername: username ?? "Host", ownerRole: ownerRole == 0 ? Roles.Player : ownerRole);
+            _roomRegistry.CreateRoom(code, ownerConnectionId: string.Empty, ownerUsername: username ?? "Host", ownerRole: ownerRole == 0 ? Roles.Player : ownerRole);
             return RedirectToPage("/GamePage", new { code });
         }
 

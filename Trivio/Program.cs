@@ -14,6 +14,8 @@ builder.Services.AddSignalR(options =>
 );
 builder.Services.AddSingleton<IRoomRegistry, RoomRegistry>();
 builder.Services.AddSingleton<RoomValidationFilter>();
+builder.Services.AddSingleton<IWordService, WordService>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
