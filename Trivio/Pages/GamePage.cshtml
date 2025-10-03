@@ -1,0 +1,115 @@
+﻿@page "{code}"
+@model Trivio.Pages.GamePageModel
+@{
+
+}
+
+@section Scripts{
+	<script>
+		let code = "@Model.Code";
+		let isAdmin = "@Model.IsAdmin";
+		const connection = new signalR.HubConnectionBuilder()
+		.withUrl("/gameHub")
+		.build();
+		
+		let role = (sessionStorage.getItem('trivio_role') || "@Model.Role").toLowerCase();
+		let username = sessionStorage.getItem('trivio_username') || "@Model.Username";
+		
+		connection.start()
+		.then(function(){
+			return connection.invoke('JoinRoom', parseInt(code), role, username);
+		})
+		.catch(function (err) {
+			return console.error(err.toString());
+		});
+
+
+		connection.on("UserJoined", function (username, role) {
+			const listId = role === "player" ? "playerList" : "spectatorList";
+			const listElement = document.getElementById(listId);
+			const listItem = document.createElement("li");
+			listItem.className = "list-group-item";
+			listItem.textContent = username;
+			listElement.appendChild(listItem);
+			console.log(`${role} joined: ${username}`);
+		});
+
+		connection.on("ReceiveUserList", function(users)
+		{
+			console.log("Existing users are received");
+			users.forEach(user=>{
+				addUserToDom(user);
+			})
+		});
+
+		function addUserToDom(user)
+		{
+			let username = user.username;
+			let role = user.role;
+			const listId = role === "player" ? "playerList" : "spectatorList";
+			const listElement = document.getElementById(listId);
+			const listItem = document.createElement("li");
+			listItem.className = "list-group-item";
+			listItem.textContent = username + " - " + role;
+			console.log("User to add dom: " + user);
+			console.log("user.isadmin: " + user.isAdmin);
+			console.log("isadmin data: "+isAdmin);
+			if(isAdmin && !user.isAdmin)
+			{
+				
+				let removeBtn = document.createElement("button");
+				removeBtn.className = "btn btn-danger";
+				let icon = document.createElement("i");
+				icon.className = "bi bi-x-lg"; // Bootstrap Kapatma Simgesi
+				removeBtn.appendChild(icon);
+				listItem.appendChild(removeBtn);
+			}
+
+			
+			listElement.appendChild(listItem);
+		};
+	</script>
+}
+<div class="container">
+	<div class="align-content-center text-center">
+		<div class="row">
+			<div class="col"></div>
+			<div class="col">
+				<div class="h5">
+					Game Code: <span class="text-primary">@Model.Code<i class="bi bi-copy"></i></span>
+					<i class="bi bi-copy"></i>
+				</div>
+			</div>
+
+			<div class="col card">
+				<div class="mt-1">
+					<h4><span class="badge bg-success">Oyuncular</span></h4>
+					<ul id="playerList" class="list-group mb-4">
+					</ul>
+				</div>
+				<div class="mt-1">
+					<h4><span class="badge bg-secondary">İzleyiciler</span></h4>
+					<ul id="spectatorList" class="list-group">
+					</ul>
+				</div>
+				<hr />
+				
+				@if (Model.IsAdmin)
+				{
+					<div class="mt-1">
+						<h4><span class="badge bg-secondary">Room Controls</span></h4>
+						<div class="row">
+							<div class="col"> 
+								<button class="btn btn-primary mt-4" onclick="closeTheGame()">Close The Game</button>
+							</div>
+							<div class="col">
+								<button class="btn btn-primary mt-4" onclick="startTheGame(true)">Start The Game</button>
+							</div>
+						</div>
+					</div>
+				}
+			</div>
+
+		</div>
+	</div>
+</div>

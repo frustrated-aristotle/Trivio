@@ -1,0 +1,11 @@
+# Ignore Visual Studio and build artifacts
+.vs/
+**/bin/
+**/obj/
+*.user
+*.suo
+*.userprefs
+*.log
+*.DS_Store
+Thumbs.db
+
