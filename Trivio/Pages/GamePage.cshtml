@@ -75,18 +75,37 @@
 			const spectatorGridArea = document.getElementById('spectatorGridArea');
 			const guessInput = document.getElementById('guessInput');
 			
+			console.log("initializeRoleBasedUI called with role:", role);
+			console.log("playerInputArea found:", !!playerInputArea);
+			console.log("spectatorGridArea found:", !!spectatorGridArea);
+			
 			if (role === 'spectator') {
+				console.log("Setting up spectator UI");
 				// Show spectator grid, hide player input
-				if (spectatorGridArea) spectatorGridArea.style.display = 'grid';
-				if (playerInputArea) playerInputArea.style.display = 'none';
+				if (spectatorGridArea) {
+					spectatorGridArea.style.display = 'grid';
+					console.log("Showed spectator grid");
+				}
+				if (playerInputArea) {
+					playerInputArea.style.display = 'none';
+					console.log("Hid player input area");
+				}
 			} else {
+				console.log("Setting up player UI");
 				// Show player input, hide spectator grid
-				if (playerInputArea) playerInputArea.style.display = 'block';
-				if (spectatorGridArea) spectatorGridArea.style.display = 'none';
+				if (playerInputArea) {
+					playerInputArea.style.display = 'block';
+					console.log("Showed player input area");
+				}
+				if (spectatorGridArea) {
+					spectatorGridArea.style.display = 'none';
+					console.log("Hid spectator grid");
+				}
 				
 				// Focus input for players and add typing event listener
 				if (guessInput) {
 					guessInput.focus();
+					console.log("Focused guess input");
 					
 					// Add typing event listener for players
 					guessInput.addEventListener('input', function() {
@@ -122,12 +141,16 @@
 
 		// Populate player cards with user data (only for spectators)
 		function populatePlayerCards(users) {
-			// Only populate cards if current user is a spectator
-			if (role !== 'spectator') {
+			console.log("populatePlayerCards called with users:", users);
+			console.log("Current role:", role);
+			
+			// Validate users array
+			if (!users || !Array.isArray(users)) {
+				console.error("Invalid users array:", users);
 				return;
 			}
-
-			// Clear all cards first
+			
+			// Hide all cards first and clear content
 			for (let i = 1; i <= 4; i++) {
 				const card = document.getElementById(`playerCard${i}`);
 				const usernameEl = document.getElementById(`username${i}`);
@@ -135,40 +158,54 @@
 				const input = document.getElementById(`input${i}`);
 				
 				if (card && usernameEl && roleEl && input) {
-					card.style.display = 'flex';
-					usernameEl.textContent = `Player ${i}`;
+					card.style.display = 'none';
+					card.classList.remove('current-user', 'spectator', 'player', 'admin', 'typing');
+					// Clear the content
+					usernameEl.textContent = '';
+					usernameEl.removeAttribute('data-username');
 					roleEl.textContent = '';
-					roleEl.className = 'player-role';
 					input.value = '';
-					input.disabled = true;
-					card.classList.remove('current-user', 'spectator', 'player', 'admin');
+					console.log(`Cleared card ${i}`);
 				}
 			}
 
-			// Populate with actual users
-			users.forEach((user, index) => {
+			// Filter out users with invalid usernames
+			const validUsers = users.filter(user => user && user.username && user.username.trim() !== '');
+			const maxUsers = Math.min(validUsers.length, 4);
+			console.log(`Populating ${maxUsers} valid users out of ${users.length} total`);
+			
+			for (let index = 0; index < maxUsers; index++) {
+				const user = validUsers[index];
 				const cardIndex = index + 1;
 				const card = document.getElementById(`playerCard${cardIndex}`);
 				const usernameEl = document.getElementById(`username${cardIndex}`);
 				const roleEl = document.getElementById(`role${cardIndex}`);
 				const input = document.getElementById(`input${cardIndex}`);
 				
-				if (card && usernameEl && roleEl && input) {
-					// Set username
-					if (user.username === currentUsername) {
-						usernameEl.textContent = `${user.username} (you)`;
-						card.classList.add('current-user');
-					} else {
-						usernameEl.textContent = user.username;
-					}
+				console.log(`Setting up card ${cardIndex} for user:`, user.username, "role:", user.role);
+				
+				if (card && usernameEl && roleEl && input && user.username) {
+					// Show the card
+					card.style.display = 'flex';
+					
+					// IMPORTANT: Set username with data attribute for reliable lookup
+					const displayUsername = user.username === currentUsername ? 
+						`${user.username} (you)` : user.username;
+					
+					usernameEl.textContent = displayUsername;
+					usernameEl.setAttribute('data-username', user.username); // Store raw username
+					
+					console.log(`Card ${cardIndex} - Set username to: "${usernameEl.textContent}"`);
+					console.log(`Card ${cardIndex} - Data attribute: "${usernameEl.getAttribute('data-username')}"`);
 					
 					// Set role
-					roleEl.textContent = user.role;
-					roleEl.className = `player-role ${user.role}`;
+					roleEl.textContent = user.role || 'player';
+					roleEl.className = `player-role ${user.role || 'player'}`;
 					
 					// All inputs are disabled for spectators (they can only watch)
 					input.disabled = true;
-					input.placeholder = user.role === 'spectator' ? "You are spectating" : "Player input";
+					input.value = ''; // Clear any previous input
+					input.placeholder = user.role === 'spectator' ? "Spectating" : "Player typing...";
 					
 					// Add styling based on role
 					if (user.role === 'spectator') {
@@ -177,12 +214,30 @@
 						card.classList.add('player');
 					}
 					
+					// Add current user styling
+					if (user.username === currentUsername) {
+						card.classList.add('current-user');
+					}
+					
 					// Add admin styling
 					if (user.role === 'admin') {
 						card.classList.add('admin');
 					}
+					
+					console.log(`Completed setup for card ${cardIndex}`);
+				} else {
+					console.log(`Missing elements for card ${cardIndex} or invalid user data:`, user);
 				}
-			});
+			}
+			
+			// Verify after population
+			console.log("=== Verification after population ===");
+			for (let i = 1; i <= 4; i++) {
+				const usernameEl = document.getElementById(`username${i}`);
+				if (usernameEl) {
+					console.log(`Card ${i} final username: "${usernameEl.textContent}" (data: "${usernameEl.getAttribute('data-username')}")`);
+				}
+			}
 		}
 
 		// Connection status display function
@@ -218,6 +273,8 @@
 
 
 		connection.on("UserJoined", function (username, role) {
+			console.log(`User joined: ${username} as ${role}`);
+			
 			const listId = role === "player" || role === "admin" ? "playerList" : "spectatorList";
 			const listElement = document.getElementById(listId);
 			const listItem = document.createElement("div");
@@ -249,6 +306,16 @@
 				listItem.classList.add('admin-owner');
 			}
 			listElement.appendChild(listItem);
+			
+			// If we're a spectator, refresh the player cards to include the new user
+			if (role === 'spectator' && currentUsername !== username) {
+				console.log("New user joined, refreshing player cards for spectator");
+				// Get current users from the sidebar and refresh cards
+				setTimeout(() => {
+					forcePopulateCards();
+				}, 100);
+			}
+			
 			console.log(`${role} joined: ${username}`);
 		});
 
@@ -269,8 +336,12 @@
 				showAdminControls();
 			}
 			
-			// Update the 4-player grid
-			populatePlayerCards(users);
+			// Update the 4-player grid FIRST before rebuilding sidebar
+			// This is crucial for spectators to see the player cards
+			if (role === 'spectator') {
+				console.log("Spectator role detected, populating player cards");
+				populatePlayerCards(users);
+			}
 			
 			// Add users back with updated points and roles (for sidebar)
 			users.forEach(user => {
@@ -378,10 +449,16 @@
 
 		connection.on("ReceiveUserList", function(users)
 		{
-			console.log("Existing users are received");
+			console.log("Existing users are received:", users);
 			users.forEach(user=>{
 				addUserToDom(user);
-			})
+			});
+			
+			// If we're a spectator, populate the player cards with existing users
+			if (role === 'spectator') {
+				console.log("Spectator role detected, populating player cards with existing users");
+				populatePlayerCards(users);
+			}
 		});
 
 		// Round start: show consonants and focus input
@@ -476,21 +553,77 @@
 			console.log("Received typing input from:", username, "Input:", input);
 			if(role === 'spectator'){
 				// Find the player card that belongs to this username
-				for (let i = 1; i <= 4; i++) {
-					const usernameElement = document.getElementById(`username${i}`);
-					if (usernameElement && usernameElement.textContent === username) {
-						const playerCard = document.getElementById(`playerCard${i}`);
-						if(playerCard){
-							const inputElement = playerCard.querySelector('.player-input');
-							if(inputElement) {
-								inputElement.value = input;
-							}
+				const cardIndex = findCardIndexByUsername(username);
+				console.log("Found card index for", username, ":", cardIndex);
+				
+				if(cardIndex > 0) {
+					const inputElement = document.getElementById(`input${cardIndex}`);
+					console.log("Input element found:", !!inputElement);
+					
+					if(inputElement) {
+						inputElement.value = input;
+						console.log("Updated input value to:", input);
+						
+						// Add typing indicator styling
+						const card = document.getElementById(`playerCard${cardIndex}`);
+						if(card) {
+							card.classList.add('typing');
+							
+							// Remove typing indicator after a delay
+							setTimeout(() => {
+								card.classList.remove('typing');
+							}, 2000);
 						}
-						break;
+					} else {
+						console.log("Input element not found for card", cardIndex);
 					}
+				} else {
+					console.log("Could not find card index for username:", username);
 				}
 			}
 		});
+
+		// Helper function to find card index by username
+		function findCardIndexByUsername(username) {
+			console.log("Looking for username:", username);
+			
+			if (!username || username.trim() === '') {
+				console.log("Invalid username provided");
+				return -1;
+			}
+			
+			for (let i = 1; i <= 4; i++) {
+				const usernameElement = document.getElementById(`username${i}`);
+				if (usernameElement) {
+					const displayName = usernameElement.textContent.trim();
+					const dataUsername = usernameElement.getAttribute('data-username');
+					
+					console.log(`Card ${i} - displayName: "${displayName}", dataUsername: "${dataUsername}"`);
+					
+					// Check both textContent and data attribute
+					if (displayName === username || 
+						displayName === `${username} (you)` ||
+						dataUsername === username ||
+						(displayName && displayName.includes(username))) {
+						console.log(`Found match at card ${i}`);
+						return i;
+					}
+				}
+			}
+			console.log("No card found for username:", username);
+			return -1;
+		}
+
+		// Function to clear typing indicator for a user
+		function clearTypingIndicator(username) {
+			const cardIndex = findCardIndexByUsername(username);
+			if(cardIndex > 0) {
+				const card = document.getElementById(`playerCard${cardIndex}`);
+				if(card) {
+					card.classList.remove('typing');
+				}
+			}
+		}
 
 		// Handle game completion
 		connection.on("GameCompleted", function(payload){
@@ -834,6 +967,88 @@
 				if (typingArea) typingArea.style.display = 'none';
 			}
 		}
+
+		// Debug function to manually test card population
+		window.debugCards = function() {
+			console.log("=== DEBUG CARDS ===");
+			console.log("Current role:", role);
+			console.log("Current username:", currentUsername);
+			
+			for (let i = 1; i <= 4; i++) {
+				const card = document.getElementById(`playerCard${i}`);
+				const usernameEl = document.getElementById(`username${i}`);
+				const roleEl = document.getElementById(`role${i}`);
+				const input = document.getElementById(`input${i}`);
+				
+				console.log(`Card ${i}:`);
+				console.log("  - Card element:", !!card);
+				console.log("  - Username element:", !!usernameEl);
+				console.log("  - Username text:", usernameEl ? usernameEl.textContent : "N/A");
+				console.log("  - Data username:", usernameEl ? usernameEl.getAttribute('data-username') : "N/A");
+				console.log("  - Role element:", !!roleEl);
+				console.log("  - Role text:", roleEl ? roleEl.textContent : "N/A");
+				console.log("  - Input element:", !!input);
+				console.log("  - Card display:", card ? card.style.display : "N/A");
+			}
+			
+			console.log("=== END DEBUG ===");
+		};
+
+		// Debug function to manually test card population with test data
+		window.testPopulateCards = function() {
+			console.log("=== TEST POPULATE CARDS ===");
+			const testUsers = [
+				{username: "KnowledgeBeast", role: "player"},
+				{username: "ShortCircuit", role: "spectator"}
+			];
+			console.log("Testing with users:", testUsers);
+			populatePlayerCards(testUsers);
+		};
+
+		// Force populate cards with actual current users
+		window.forcePopulateCards = function() {
+			console.log("=== FORCE POPULATE CARDS ===");
+			console.log("Forcing spectator grid to show");
+			document.getElementById('spectatorGridArea').style.display = 'grid';
+			document.getElementById('playerInputArea').style.display = 'none';
+			
+			// Get users from the sidebar lists
+			const playerList = document.getElementById('playerList');
+			const spectatorList = document.getElementById('spectatorList');
+			
+			const users = [];
+			
+			// Get players
+			if (playerList) {
+				const playerItems = playerList.querySelectorAll('.user-item');
+				playerItems.forEach(item => {
+					const usernameSpan = item.querySelector('.user-info span');
+					if (usernameSpan) {
+						users.push({
+							username: usernameSpan.textContent.trim(),
+							role: 'player'
+						});
+					}
+				});
+			}
+			
+			// Get spectators
+			if (spectatorList) {
+				const spectatorItems = spectatorList.querySelectorAll('.user-item');
+				spectatorItems.forEach(item => {
+					const usernameSpan = item.querySelector('.user-info span');
+					if (usernameSpan) {
+						users.push({
+							username: usernameSpan.textContent.trim(),
+							role: 'spectator'
+						});
+					}
+				});
+			}
+			
+			console.log("Found users from sidebar:", users);
+			populatePlayerCards(users);
+		};
 	</script>
 }
 
@@ -956,7 +1171,7 @@
 							<!-- Player 1 Card -->
 							<div class="player-card" id="playerCard1">
 								<div class="player-header">
-									<span class="player-username" id="username1">username1</span>
+									<span class="player-username" id="username1"></span>
 									<span class="player-role" id="role1"></span>
 								</div>
 								<div class="player-input-container">
@@ -973,7 +1188,7 @@
 							<!-- Player 2 Card -->
 							<div class="player-card" id="playerCard2">
 								<div class="player-header">
-									<span class="player-username" id="username2">username2</span>
+									<span class="player-username" id="username2"></span>
 									<span class="player-role" id="role2"></span>
 								</div>
 								<div class="player-input-container">
@@ -990,8 +1205,8 @@
 							<!-- Player 3 Card -->
 							<div class="player-card" id="playerCard3">
 								<div class="player-header">
-									<span class="player-username" id="username3">username3</span>
-									<span class="player-role" id="role3">spectator</span>
+									<span class="player-username" id="username3"></span>
+									<span class="player-role" id="role3"></span>
 								</div>
 								<div class="player-input-container">
 									<input type="text" 
@@ -1007,8 +1222,8 @@
 							<!-- Player 4 Card -->
 							<div class="player-card" id="playerCard4">
 								<div class="player-header">
-									<span class="player-username" id="username4">username4 (you)</span>
-									<span class="player-role" id="role4">spectator</span>
+									<span class="player-username" id="username4"></span>
+									<span class="player-role" id="role4"></span>
 								</div>
 								<div class="player-input-container">
 									<input type="text" 
