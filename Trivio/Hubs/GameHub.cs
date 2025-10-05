@@ -21,6 +21,14 @@ namespace Trivio.Hubs
         public string Code { get; set; }
         public string Username { get; set; }
     }
+
+    public class ShareTypingInputData
+    {
+        public string Username { get; set; }
+        public string Input { get; set; }
+        public string Code { get; set; }
+    }
+
     public class GameHub : Hub
     {
         private readonly IRoomRegistry _roomRegistry;
@@ -424,7 +432,14 @@ namespace Trivio.Hubs
                 await Clients.Caller.SendAsync("ServerMessage", "Error closing room", "error");
             }
         }
-
+        [HubMethodName("ShareTypingInput")]
+        public async Task ShareTypingInput(ShareTypingInputData data)
+        {       
+            
+            // Ensure the group name matches how it was created in JoinRoom
+            var groupName = data.Code.Trim();
+            await Clients.OthersInGroup(groupName).SendAsync("ReceiveTypingInput", data.Username, data.Input);
+        }
         [HubMethodName("KickUser")]
         public async Task KickUser(int code, string targetUsername)
         {

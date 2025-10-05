@@ -23,8 +23,8 @@
 		let gameTimerInterval = null;
 		let gameStartTime = null;
 		
-		let guessInput = document.getElementById('guessInput');
-		guessInput.focus();
+		// Initialize UI based on role
+		initializeRoleBasedUI();
 
 		// Initialize admin controls if user is already admin
 		if (isAdmin) {
@@ -68,6 +68,122 @@
 			console.error('SignalR connection failed:', err);
 			showConnectionStatus('Connection Failed', 'danger');
 		});
+
+		// Initialize UI based on user role
+		function initializeRoleBasedUI() {
+			const playerInputArea = document.getElementById('playerInputArea');
+			const spectatorGridArea = document.getElementById('spectatorGridArea');
+			const guessInput = document.getElementById('guessInput');
+			
+			if (role === 'spectator') {
+				// Show spectator grid, hide player input
+				if (spectatorGridArea) spectatorGridArea.style.display = 'grid';
+				if (playerInputArea) playerInputArea.style.display = 'none';
+			} else {
+				// Show player input, hide spectator grid
+				if (playerInputArea) playerInputArea.style.display = 'block';
+				if (spectatorGridArea) spectatorGridArea.style.display = 'none';
+				
+				// Focus input for players and add typing event listener
+				if (guessInput) {
+					guessInput.focus();
+					
+					// Add typing event listener for players
+					guessInput.addEventListener('input', function() {
+						console.log("Typing input:", guessInput.value);
+						connection.invoke('ShareTypingInput', {username: username, input: guessInput.value, code: code});
+					});
+				}
+			}
+		}
+
+
+		// Find the card that belongs to the current user
+		function findCurrentUserCard() {
+			for (let i = 1; i <= 4; i++) {
+				const usernameElement = document.getElementById(`username${i}`);
+				if (usernameElement && usernameElement.textContent.includes('(you)')) {
+					return document.getElementById(`playerCard${i}`);
+				}
+			}
+			return null;
+		}
+
+		// Get the input element for the current user
+		function getCurrentUserInput() {
+			if (role === 'spectator') {
+				// For spectators, return null since they can't type
+				return null;
+			} else {
+				// For players, return the main guess input
+				return document.getElementById('guessInput');
+			}
+		}
+
+		// Populate player cards with user data (only for spectators)
+		function populatePlayerCards(users) {
+			// Only populate cards if current user is a spectator
+			if (role !== 'spectator') {
+				return;
+			}
+
+			// Clear all cards first
+			for (let i = 1; i <= 4; i++) {
+				const card = document.getElementById(`playerCard${i}`);
+				const usernameEl = document.getElementById(`username${i}`);
+				const roleEl = document.getElementById(`role${i}`);
+				const input = document.getElementById(`input${i}`);
+				
+				if (card && usernameEl && roleEl && input) {
+					card.style.display = 'flex';
+					usernameEl.textContent = `Player ${i}`;
+					roleEl.textContent = '';
+					roleEl.className = 'player-role';
+					input.value = '';
+					input.disabled = true;
+					card.classList.remove('current-user', 'spectator', 'player', 'admin');
+				}
+			}
+
+			// Populate with actual users
+			users.forEach((user, index) => {
+				const cardIndex = index + 1;
+				const card = document.getElementById(`playerCard${cardIndex}`);
+				const usernameEl = document.getElementById(`username${cardIndex}`);
+				const roleEl = document.getElementById(`role${cardIndex}`);
+				const input = document.getElementById(`input${cardIndex}`);
+				
+				if (card && usernameEl && roleEl && input) {
+					// Set username
+					if (user.username === currentUsername) {
+						usernameEl.textContent = `${user.username} (you)`;
+						card.classList.add('current-user');
+					} else {
+						usernameEl.textContent = user.username;
+					}
+					
+					// Set role
+					roleEl.textContent = user.role;
+					roleEl.className = `player-role ${user.role}`;
+					
+					// All inputs are disabled for spectators (they can only watch)
+					input.disabled = true;
+					input.placeholder = user.role === 'spectator' ? "You are spectating" : "Player input";
+					
+					// Add styling based on role
+					if (user.role === 'spectator') {
+						card.classList.add('spectator');
+					} else {
+						card.classList.add('player');
+					}
+					
+					// Add admin styling
+					if (user.role === 'admin') {
+						card.classList.add('admin');
+					}
+				}
+			});
+		}
 
 		// Connection status display function
 		function showConnectionStatus(message, type) {
@@ -153,7 +269,10 @@
 				showAdminControls();
 			}
 			
-			// Add users back with updated points and roles
+			// Update the 4-player grid
+			populatePlayerCards(users);
+			
+			// Add users back with updated points and roles (for sidebar)
 			users.forEach(user => {
 				const listId = user.role === "player" || user.role === "admin" ? "playerList" : "spectatorList";
 				const listElement = document.getElementById(listId);
@@ -276,6 +395,9 @@
 			}
 			if (waitingArea) { waitingArea.style.display = 'none'; }
 			
+			// Re-initialize role-based UI when game starts
+			initializeRoleBasedUI();
+			
 			// Start the game timer when the first round begins
 			if (payload.roundNumber === 1) {
 				startGameTimer();
@@ -312,8 +434,11 @@
 				instructionsEl.innerText = payload.message;
 			}
 			
-			const gi = document.getElementById('guessInput');
-			if (gi) { gi.value = ''; gi.focus(); }
+			const currentInput = getCurrentUserInput();
+			if (currentInput) { 
+				currentInput.value = ''; 
+				currentInput.focus(); 
+			}
 		});
 
 		// Handle guess results
@@ -347,6 +472,25 @@
 			}, notificationDuration);
 		});
 
+		connection.on("ReceiveTypingInput", function(username, input) {
+			console.log("Received typing input from:", username, "Input:", input);
+			if(role === 'spectator'){
+				// Find the player card that belongs to this username
+				for (let i = 1; i <= 4; i++) {
+					const usernameElement = document.getElementById(`username${i}`);
+					if (usernameElement && usernameElement.textContent === username) {
+						const playerCard = document.getElementById(`playerCard${i}`);
+						if(playerCard){
+							const inputElement = playerCard.querySelector('.player-input');
+							if(inputElement) {
+								inputElement.value = input;
+							}
+						}
+						break;
+					}
+				}
+			}
+		});
 
 		// Handle game completion
 		connection.on("GameCompleted", function(payload){
@@ -423,7 +567,13 @@
 		document.addEventListener('keydown', function(event) {
 				if(event.key === 'Spacebar' || event.key === 'Enter')
 				{
-					submitGuess(guessInput.value);
+					// Only allow submission for players, not spectators
+					if (role !== 'spectator') {
+						const currentInput = getCurrentUserInput();
+						if (currentInput) {
+							submitGuess(currentInput.value);
+						}
+					}
 				}
 		});
 		function addUserToDom(user)
@@ -647,8 +797,42 @@
 		function submitGuess(guess)
 		{
 			connection.invoke('SubmitGuess', {guess: guess, code: code, username: username});
-			guessInput.value = '';
-			guessInput.focus();
+			const currentInput = getCurrentUserInput();
+			if (currentInput) {
+				currentInput.value = '';
+				currentInput.focus();
+			}
+		}
+
+		// Placeholder functions for future typing indicators feature
+		function showTypingIndicator(username) {
+			// This will be implemented when you add the hub function
+			console.log(`${username} started typing`);
+		}
+
+		function hideTypingIndicator(username) {
+			// This will be implemented when you add the hub function
+			console.log(`${username} stopped typing`);
+		}
+
+		function updateTypingPlayersList(typingUsers) {
+			// This will be implemented when you add the hub function
+			const typingArea = document.getElementById('typingIndicatorsArea');
+			const typingList = document.getElementById('typingPlayersList');
+			
+			if (typingUsers && typingUsers.length > 0) {
+				if (typingArea) typingArea.style.display = 'block';
+				if (typingList) {
+					typingList.innerHTML = typingUsers.map(user => 
+						`<div class="typing-player">
+							<i class="bi bi-three-dots"></i>
+							${user}
+						</div>`
+					).join('');
+				}
+			} else {
+				if (typingArea) typingArea.style.display = 'none';
+			}
 		}
 	</script>
 }
@@ -758,13 +942,84 @@
 							</div>
 						</div>
 						
-						<!-- Input Area -->
-						<div class="input-area">
+						<!-- Player Input Area (for players only) -->
+						<div id="playerInputArea" class="input-area">
 							<input type="text" 
 								   id="guessInput" 
 								   class="guess-input"
 								   placeholder="Type a word using only the consonants above..." 
 								   autocomplete="off">
+						</div>
+
+						<!-- Four Player Grid Layout (for spectators only) -->
+						<div id="spectatorGridArea" class="players-grid" style="display: none;">
+							<!-- Player 1 Card -->
+							<div class="player-card" id="playerCard1">
+								<div class="player-header">
+									<span class="player-username" id="username1">username1</span>
+									<span class="player-role" id="role1"></span>
+								</div>
+								<div class="player-input-container">
+									<input type="text" 
+										   class="player-input" 
+										   id="input1"
+										   placeholder="Type a word..." 
+										   autocomplete="off"
+										   disabled>
+								</div>
+								<div class="player-status" id="status1"></div>
+							</div>
+
+							<!-- Player 2 Card -->
+							<div class="player-card" id="playerCard2">
+								<div class="player-header">
+									<span class="player-username" id="username2">username2</span>
+									<span class="player-role" id="role2"></span>
+								</div>
+								<div class="player-input-container">
+									<input type="text" 
+										   class="player-input" 
+										   id="input2"
+										   placeholder="Type a word..." 
+										   autocomplete="off"
+										   disabled>
+								</div>
+								<div class="player-status" id="status2"></div>
+							</div>
+
+							<!-- Player 3 Card -->
+							<div class="player-card" id="playerCard3">
+								<div class="player-header">
+									<span class="player-username" id="username3">username3</span>
+									<span class="player-role" id="role3">spectator</span>
+								</div>
+								<div class="player-input-container">
+									<input type="text" 
+										   class="player-input" 
+										   id="input3"
+										   placeholder="Type a word..." 
+										   autocomplete="off"
+										   disabled>
+								</div>
+								<div class="player-status" id="status3"></div>
+							</div>
+
+							<!-- Player 4 Card -->
+							<div class="player-card" id="playerCard4">
+								<div class="player-header">
+									<span class="player-username" id="username4">username4 (you)</span>
+									<span class="player-role" id="role4">spectator</span>
+								</div>
+								<div class="player-input-container">
+									<input type="text" 
+										   class="player-input" 
+										   id="input4"
+										   placeholder="Type a word..." 
+										   autocomplete="off"
+										   disabled>
+								</div>
+								<div class="player-status" id="status4"></div>
+							</div>
 						</div>
 						
 						<!-- Message Area -->
