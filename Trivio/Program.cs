@@ -10,6 +10,10 @@ builder.Services.AddRazorPages();
 builder.Services.AddSignalR(options =>
     { 
         options.AddFilter<RoomValidationFilter>();
+        options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+        options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+        options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
+        options.HandshakeTimeout = TimeSpan.FromSeconds(15);
     }
 );
 builder.Services.AddSingleton<IRoomRegistry, RoomRegistry>();

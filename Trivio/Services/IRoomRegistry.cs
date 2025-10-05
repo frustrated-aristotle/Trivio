@@ -3,7 +3,7 @@ using Trivio.Models;
 
 namespace Trivio.Services
 {
-    public interface IRoomRegistry
+    public interface IRoomRegistry : IDisposable
     {
         Room CreateRoom(int code, string ownerConnectionId, string ownerUsername, Roles ownerRole, int capacity = 8);
         Room? GetRoom(int code);

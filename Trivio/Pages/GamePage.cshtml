@@ -1,40 +1,260 @@
 ﻿@page "{code}"
 @model Trivio.Pages.GamePageModel
 @{
-
 }
+<link rel="stylesheet" href="~/css/gamepage.css" asp-append-version="true" />
+
 
 @section Scripts{
 	<script>
 		let code = "@Model.Code";
-		let isAdmin = "@Model.IsAdmin";
 		const connection = new signalR.HubConnectionBuilder()
 		.withUrl("/gameHub")
+		.withAutomaticReconnect([0, 2000, 10000, 30000]) // Reconnect attempts with delays
+		.configureLogging(signalR.LogLevel.Information)
 		.build();
 		
 		let role = (sessionStorage.getItem('trivio_role') || "@Model.Role").toLowerCase();
 		let username = sessionStorage.getItem('trivio_username') || "@Model.Username";
+		let currentUsername = username; // Alias for consistency
+		let isAdmin = @Model.IsAdmin.ToString().ToLower(); // Set initial admin status
+		
+		// Game timer variables
+		let gameTimerInterval = null;
+		let gameStartTime = null;
 		
 		let guessInput = document.getElementById('guessInput');
 		guessInput.focus();
 
+		// Initialize admin controls if user is already admin
+		if (isAdmin) {
+			// Wait for DOM to be ready, then show admin controls
+			setTimeout(() => {
+				showAdminControls();
+			}, 100);
+		}
+
+		// Cleanup timer when page is unloaded
+		window.addEventListener('beforeunload', function() {
+			stopGameTimer();
+		});
+
+		// Connection state management
+		connection.onreconnecting((error) => {
+			console.log('SignalR reconnecting...', error);
+			showConnectionStatus('Reconnecting...', 'warning');
+		});
+
+		connection.onreconnected((connectionId) => {
+			console.log('SignalR reconnected with connection ID:', connectionId);
+			showConnectionStatus('Connected', 'success');
+			// Rejoin the room after reconnection
+			connection.invoke('JoinRoom', parseInt(code), role, username)
+				.catch(err => console.error('Failed to rejoin room:', err));
+		});
+
+		connection.onclose((error) => {
+			console.log('SignalR connection closed:', error);
+			showConnectionStatus('Disconnected', 'danger');
+		});
+
 		connection.start()
 		.then(function(){
+			console.log('SignalR connected');
+			showConnectionStatus('Connected', 'success');
 			return connection.invoke('JoinRoom', parseInt(code), role, username);
 		})
 		.catch(function (err) {
-			return console.error(err.toString());
+			console.error('SignalR connection failed:', err);
+			showConnectionStatus('Connection Failed', 'danger');
 		});
+
+		// Connection status display function
+		function showConnectionStatus(message, type) {
+			// Remove existing status
+			const existingStatus = document.getElementById('connectionStatus');
+			if (existingStatus) {
+				existingStatus.remove();
+			}
+			
+			// Create new status indicator
+			const statusDiv = document.createElement('div');
+			statusDiv.id = 'connectionStatus';
+			statusDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+			statusDiv.style.cssText = 'top: 10px; right: 10px; z-index: 9999; min-width: 200px;';
+			statusDiv.innerHTML = `
+				<i class="bi bi-${type === 'success' ? 'wifi' : type === 'warning' ? 'wifi-off' : 'x-circle'}"></i>
+				${message}
+				<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+			`;
+			
+			document.body.appendChild(statusDiv);
+			
+			// Auto-hide success messages
+			if (type === 'success') {
+				setTimeout(() => {
+					if (statusDiv && statusDiv.parentNode) {
+						statusDiv.remove();
+					}
+				}, 3000);
+			}
+		}
 
 
 		connection.on("UserJoined", function (username, role) {
-			const listId = role === "player" ? "playerList" : "spectatorList";
+			const listId = role === "player" || role === "admin" ? "playerList" : "spectatorList";
 			const listElement = document.getElementById(listId);
-			const listItem = document.createElement("li");
-			listItem.className = "list-group-item";
-			listItem.textContent = username;
+			const listItem = document.createElement("div");
+			listItem.className = "user-item";
+			listItem.setAttribute('data-username', username);
+			
+			const roleColor = role === 'admin' ? 'warning' : (role === 'player' ? 'success' : 'secondary');
+			const iconColor = role === 'admin' ? 'warning' : (role === 'player' ? 'success' : 'secondary');
+			
+			listItem.innerHTML = `
+				<div class="user-info">
+					<i class="bi bi-person-circle text-${iconColor}"></i>
+					<span>${username}</span>
+					${role === 'admin' ? '<i class="bi bi-crown-fill admin-crown text-warning ms-2" title="Room Owner"></i>' : ''}
+				</div>
+				<div class="user-actions">
+					${role === 'player' || role === 'admin' ? '<span class="points-pill">0 pts</span>' : ''}
+					<span class="badge badge-${roleColor}">${role}</span>
+					${isAdmin && username !== currentUsername ? `
+						<button class="btn btn-sm btn-outline-danger" onclick="kickUser('${username}')">
+							<i class="bi bi-x-lg"></i>
+						</button>
+					` : ''}
+				</div>
+			`;
+			
+			// Add admin styling if this is the current user and they're admin
+			if (username === currentUsername && role === 'admin') {
+				listItem.classList.add('admin-owner');
+			}
 			listElement.appendChild(listItem);
 			console.log(`${role} joined: ${username}`);
+		});
+
+		connection.on("UserListUpdated", function (users) {
+			console.log("User list updated with points:", users);
+			
+			// Clear existing user lists
+			const playerList = document.getElementById('playerList');
+			const spectatorList = document.getElementById('spectatorList');
+			
+			if (playerList) playerList.innerHTML = '';
+			if (spectatorList) spectatorList.innerHTML = '';
+			
+			// Check if current user is now admin
+			const currentUser = users.find(user => user.username === currentUsername);
+			if (currentUser && currentUser.role === 'admin') {
+				isAdmin = true;
+				showAdminControls();
+			}
+			
+			// Add users back with updated points and roles
+			users.forEach(user => {
+				const listId = user.role === "player" || user.role === "admin" ? "playerList" : "spectatorList";
+				const listElement = document.getElementById(listId);
+				if (listElement) {
+					const listItem = document.createElement("div");
+					listItem.className = "user-item";
+					listItem.setAttribute('data-username', user.username);
+					
+					const roleColor = user.role === 'admin' ? 'warning' : (user.role === 'player' ? 'success' : 'secondary');
+					const iconColor = user.role === 'admin' ? 'warning' : (user.role === 'player' ? 'success' : 'secondary');
+					
+					listItem.innerHTML = `
+						<div class="user-info">
+							<i class="bi bi-person-circle text-${iconColor}"></i>
+							<span>${user.username}</span>
+							${user.role === 'admin' ? '<i class="bi bi-crown-fill admin-crown text-warning ms-2" title="Room Owner"></i>' : ''}
+						</div>
+						<div class="user-actions">
+							${user.role === 'player' || user.role === 'admin' ? `<span class="points-pill">${user.points || 0} pts</span>` : ''}
+							<span class="badge badge-${roleColor}">${user.role}</span>
+							${isAdmin && user.username !== currentUsername ? `
+								<button class="btn btn-sm btn-outline-danger" onclick="kickUser('${user.username}')">
+									<i class="bi bi-x-lg"></i>
+								</button>
+							` : ''}
+						</div>
+					`;
+					
+					// Add admin styling if this is the current user and they're admin
+					if (user.username === currentUsername && user.role === 'admin') {
+						listItem.classList.add('admin-owner');
+					}
+					listElement.appendChild(listItem);
+				}
+			});
+		});
+
+		connection.on("UserLeft", function (connectionId) {
+			// Remove user from both lists
+			const playerList = document.getElementById('playerList');
+			const spectatorList = document.getElementById('spectatorList');
+			
+			[playerList, spectatorList].forEach(list => {
+				if (list) {
+					const items = list.querySelectorAll('.user-item');
+					items.forEach(item => {
+						// Remove items that might be from the disconnected user
+						// Note: We don't have direct connectionId mapping on client, 
+						// so we'll rely on server-side cleanup
+					});
+				}
+			});
+			
+			console.log(`User left: ${connectionId}`);
+		});
+
+		// Handle room ownership transfer
+		connection.on("OwnerChanged", function (payload) {
+			console.log("Room ownership changed:", payload);
+			showConnectionStatus(payload.message, 'info');
+			setTimeout(() => {
+				showConnectionStatus('', 'success'); // Clear the message
+			}, 3000);
+		});
+
+		connection.on("YouAreNowOwner", function(payload)
+		{
+			console.log("=== YouAreNowOwner event received ===");
+			console.log("Payload:", payload);
+			console.log("Current username:", currentUsername);
+			console.log("isAdmin before:", isAdmin);
+			
+			// Update the global isAdmin variable
+			isAdmin = true;
+			console.log("isAdmin after:", isAdmin);
+			
+			// Show admin controls
+			console.log("Calling showAdminControls...");
+			showAdminControls();
+			
+			// Show notification
+			showConnectionStatus("🎉 " + payload.message, 'success');
+			
+			// Update user's role badge in the UI
+			updateUserRoleBadge('admin');
+			
+			setTimeout(() => {
+				showConnectionStatus('', 'success'); // Clear the message
+			}, 5000);
+			
+			console.log("=== YouAreNowOwner event completed ===");
+		});
+		// Handle room closure
+		connection.on("RoomClosed", function (payload) {
+			console.log("Room closed:", payload);
+			showConnectionStatus(payload.message, 'warning');
+			
+			// Redirect to home page after a delay
+			setTimeout(() => {
+				window.location.href = '/';
+			}, 5000);
 		});
 
 		connection.on("ReceiveUserList", function(users)
@@ -48,20 +268,41 @@
 		// Round start: show consonants and focus input
 		connection.on("RoundStarted", function(payload){
 			const roundArea = document.getElementById('roundArea');
-			if (roundArea) { roundArea.style.display = 'block'; }
+			const waitingArea = document.getElementById('waitingArea');
 			
-			// Display consonants
+			if (roundArea) { 
+				roundArea.style.display = 'flex'; 
+				roundArea.scrollIntoView({ behavior: 'smooth' });
+			}
+			if (waitingArea) { waitingArea.style.display = 'none'; }
+			
+			// Start the game timer when the first round begins
+			if (payload.roundNumber === 1) {
+				startGameTimer();
+			}
+			
+			// Display consonants with better styling
 			const consonantsEl = document.getElementById('consonantsDisplay');
 			if (consonantsEl && payload.consonants) {
-				const consonantsHtml = payload.consonants.map(c => `<span class="badge bg-primary me-2 fs-4">${c.toUpperCase()}</span>`).join('');
+				const consonantsHtml = payload.consonants.map(c => `
+					<span class="consonant-badge">${c.toUpperCase()}</span>
+				`).join('');
 				consonantsEl.innerHTML = consonantsHtml;
 			}
 			
-			// Update game progress
+			// Update game progress and progress bar
 			if (payload.roundNumber) {
 				const progressEl = document.getElementById('gameProgress');
+				const progressBar = document.getElementById('progressBar');
+				
 				if (progressEl) {
 					progressEl.innerText = `Round ${payload.roundNumber} of 10`;
+				}
+				
+				if (progressBar) {
+					const progressPercent = (payload.roundNumber / 10) * 100;
+					progressBar.style.width = `${progressPercent}%`;
+					progressBar.setAttribute('aria-valuenow', payload.roundNumber);
 				}
 			}
 			
@@ -78,7 +319,7 @@
 		// Handle guess results
 		connection.on("GuessResult", function(payload) {
 			const maxNotifications = 5;
-			const notificationDuration = 3000; // 3 saniye
+			const notificationDuration = 3000;
 			
 			let containerEl = document.getElementById('notificationContainer');
 			if (!containerEl) {
@@ -89,7 +330,7 @@
 
 			const alertClass = payload.success ? 'alert-success' : 'alert-danger';
 			const notificationEl = document.createElement('div');
-			notificationEl.className = `alert ${alertClass} notification-item`;
+			notificationEl.className = `notification-item ${alertClass}`;
 			notificationEl.innerHTML = payload.message;
 
 			containerEl.prepend(notificationEl); 
@@ -109,40 +350,52 @@
 
 		// Handle game completion
 		connection.on("GameCompleted", function(payload){
+			// Stop the game timer when game completes
+			stopGameTimer();
+			
 			if (payload.gameCompleted) {
 				// Show completion modal
 				const modal = document.getElementById('gameCompletionModal');
 				if (modal) {
 					const modalBody = document.getElementById('modalBody');
 					if (modalBody) {
+						// Get final scores from user lists
+						const playerList = document.getElementById('playerList');
+						const players = Array.from(playerList.querySelectorAll('.user-item')).map(item => {
+							const username = item.querySelector('span').textContent;
+							const pointsText = item.querySelector('.points-pill')?.textContent || '0 pts';
+							const points = parseInt(pointsText.replace(' pts', '')) || 0;
+							return { username, points };
+						}).sort((a, b) => b.points - a.points);
+						
+						const leaderboardHtml = players.length > 0 ? `
+							<div class="stat-card">
+								<h5>🏆 Final Scores</h5>
+								<div style="text-align: left;">
+									${players.map((player, index) => `
+										<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+											<span><strong>#${index + 1}</strong> ${player.username}</span>
+											<span class="points-pill" style="font-size: 0.8rem;">${player.points} pts</span>
+										</div>
+									`).join('')}
+								</div>
+							</div>
+						` : '';
+						
 						modalBody.innerHTML = `
-							<div class="text-center">
-								<h3 class="text-success mb-3">🎉 Congratulations! 🎉</h3>
-								<p class="fs-5 mb-3">${payload.message}</p>
-								<div class="row">
-									<div class="col-md-6">
-										<div class="card bg-light">
-											<div class="card-body">
-												<h5 class="card-title">📊 Game Statistics</h5>
-												<p class="card-text">
-													<strong>Total Rounds:</strong> ${payload.totalRounds}<br>
-													<strong>Game Type:</strong> Consonant Challenge<br>
-													<strong>Language:</strong> Turkish
-												</p>
-											</div>
-										</div>
+							<div style="text-align: center;">
+								<h3 style="color: var(--success); margin-bottom: 1rem;">🎉 Congratulations! 🎉</h3>
+								<p style="font-size: 1.125rem; margin-bottom: 1.5rem;">${payload.message}</p>
+								<div class="stats-grid">
+									<div class="stat-card">
+										<h5>📊 Game Statistics</h5>
+										<p>
+											<strong>Total Rounds:</strong> ${payload.totalRounds}<br>
+											<strong>Game Type:</strong> Consonant Challenge<br>
+											<strong>Language:</strong> Turkish
+										</p>
 									</div>
-									<div class="col-md-6">
-										<div class="card bg-light">
-											<div class="card-body">
-												<h5 class="card-title">🏆 Achievement</h5>
-												<p class="card-text">
-													You successfully completed all 10 rounds of the consonant challenge! 
-													Well done on your Turkish vocabulary skills!
-												</p>
-											</div>
-										</div>
-									</div>
+									${leaderboardHtml}
 								</div>
 							</div>
 						`;
@@ -155,10 +408,9 @@
 				const roundArea = document.getElementById('roundArea');
 				if (roundArea) {
 					roundArea.innerHTML = `
-						<div class="alert alert-info text-center">
-							<h4>🎉 Game Completed! 🎉</h4>
-							<p>${payload.message}</p>
-							<button class="btn btn-primary" onclick="location.reload()">Play Again</button>
+						<div style="background: white; border-radius: 12px; padding: 2rem; text-align: center; box-shadow: var(--shadow-lg);">
+							<h4 style="color: var(--info); margin-bottom: 1rem;">🎉 Game Completed! 🎉</h4>
+							<p style="margin-bottom: 1.5rem;">${payload.message}</p>
 						</div>
 					`;
 				}
@@ -180,26 +432,137 @@
 			let role = user.role;
 			const listId = role === "player" ? "playerList" : "spectatorList";
 			const listElement = document.getElementById(listId);
-			const listItem = document.createElement("li");
-			listItem.className = "list-group-item";
-			listItem.textContent = username + " - " + role;
-			console.log("User to add dom: " + user);
-			console.log("user.isadmin: " + user.isAdmin);
-			console.log("isadmin data: "+isAdmin);
+			const listItem = document.createElement("div");
+			listItem.className = "user-item";
+			listItem.setAttribute('data-username', username);
+			
+			let itemContent = `
+				<div class="user-info">
+					<i class="bi bi-person-circle text-${role === 'player' ? 'success' : 'secondary'}"></i>
+					<span>${username}</span>
+				</div>
+				<div class="user-actions">
+					${role === 'player' ? `<span class="points-pill">${user.points || 0} pts</span>` : ''}
+					<span class="badge badge-${role === 'player' ? 'success' : 'secondary'}">${role}</span>
+			`;
+			
 			if(isAdmin && !user.isAdmin)
 			{
-				
-				let removeBtn = document.createElement("button");
-				removeBtn.className = "btn btn-danger";
-				let icon = document.createElement("i");
-				icon.className = "bi bi-x-lg"; // Bootstrap Kapatma Simgesi
-				removeBtn.appendChild(icon);
-				listItem.appendChild(removeBtn);
+				itemContent += `
+					<button class="btn btn-sm btn-outline-danger" onclick="kickUser('${username}')">
+						<i class="bi bi-x-lg"></i>
+					</button>
+				`;
 			}
-
 			
+			itemContent += `</div>`;
+			listItem.innerHTML = itemContent;
 			listElement.appendChild(listItem);
 		};
+
+		function showAdminControls()
+		{
+			console.log("showAdminControls called for user:", currentUsername);
+			
+			// Check if admin controls already exist
+			let adminControls = document.querySelector('.admin-controls');
+			
+			if (!adminControls) {
+				console.log("Creating new admin controls...");
+				// Create and inject admin controls
+				adminControls = createAdminControlsElement();
+				
+				// Try multiple selectors to find the right container
+				let userListsContainer = document.querySelector('.col-md-4');
+				if (!userListsContainer) {
+					userListsContainer = document.querySelector('.col-lg-4');
+				}
+				if (!userListsContainer) {
+					userListsContainer = document.querySelector('.user-lists-container');
+				}
+				if (!userListsContainer) {
+					// Fallback: find the container with user lists
+					const playerList = document.getElementById('playerList');
+					if (playerList) {
+						userListsContainer = playerList.closest('.col-md-4') || playerList.closest('.col-lg-4') || playerList.parentElement.parentElement;
+					}
+				}
+				
+				if (userListsContainer) {
+					console.log("Found container, appending admin controls");
+					userListsContainer.appendChild(adminControls);
+				} else {
+					console.error("Could not find container for admin controls");
+					// Fallback: append to body
+					document.body.appendChild(adminControls);
+				}
+			} else {
+				console.log("Showing existing admin controls");
+				// Show existing admin controls
+				adminControls.style.display = 'block';
+			}
+
+			// Add admin indicator to user list
+			const userItems = document.querySelectorAll('.user-item');
+			userItems.forEach(item => {
+				const username = item.querySelector('span').textContent;
+				if (username === currentUsername) {
+					console.log("Adding admin styling to user:", username);
+					// Add admin styling
+					item.classList.add('admin-owner');
+					
+					// Add crown icon to indicate admin
+					const userInfo = item.querySelector('.user-info');
+					if (userInfo && !userInfo.querySelector('.admin-crown')) {
+						const crown = document.createElement('i');
+						crown.className = 'bi bi-crown-fill admin-crown text-warning ms-2';
+						crown.title = 'Room Owner';
+						userInfo.appendChild(crown);
+					}
+				}
+			});
+
+			console.log("Admin controls enabled for user:", currentUsername);
+		}
+
+		function createAdminControlsElement()
+		{
+			const adminControls = document.createElement('div');
+			adminControls.className = 'admin-controls';
+			adminControls.innerHTML = `
+				<h5>
+					<i class="bi bi-gear"></i>
+					Controls
+				</h5>
+				<div class="admin-buttons">
+					<button class="btn btn-success" onclick="startTheGame(true)">
+						<i class="bi bi-play-fill"></i>
+						Start Game
+					</button>
+					<button class="btn btn-outline-danger" onclick="closeTheGame()">
+						<i class="bi bi-stop-fill"></i>
+						Close Game
+					</button>
+				</div>
+			`;
+			return adminControls;
+		}
+
+		function updateUserRoleBadge(newRole)
+		{
+			// Update the user's role badge in both player and spectator lists
+			const userItems = document.querySelectorAll('.user-item');
+			userItems.forEach(item => {
+				const username = item.querySelector('span').textContent;
+				if (username === currentUsername) {
+					const badge = item.querySelector('.badge');
+					if (badge) {
+						badge.textContent = newRole;
+						badge.className = `badge badge-${newRole === 'admin' ? 'warning' : 'success'}`;
+					}
+				}
+			});
+		}
 
 		function startTheGame(isAdmin)
 		{
@@ -207,6 +570,80 @@
 			connection.invoke('StartTheGame', parseInt(code), 1)
 				.catch(err => console.error(err));
 		}
+		
+		function closeTheGame()
+		{
+			if (confirm('Are you sure you want to close the game? This will end the session for all players.')) {
+				// Close the room - you might want to implement this in the hub
+				connection.invoke('CloseRoom', parseInt(code))
+					.then(function () {
+						console.log('Room close requested');
+						// Redirect to home page
+						setTimeout(() => {
+							window.location.href = '/';
+						}, 2000);
+					})
+					.catch(function (err) {
+						console.error('Error closing room:', err.toString());
+					});
+			}
+		}
+
+		function kickUser(username)
+		{
+			if (confirm(`Are you sure you want to kick ${username} from the room?`)) {
+				connection.invoke('KickUser', parseInt(code), username)
+					.then(function () {
+						console.log('User kick requested for:', username);
+					})
+					.catch(function (err) {
+						console.error('Error kicking user:', err.toString());
+						showConnectionStatus('Error kicking user', 'danger');
+					});
+			}
+		}
+
+		function startGameTimer()
+		{
+			console.log("Starting game timer...");
+			gameStartTime = Date.now();
+			
+			gameTimerInterval = setInterval(function() {
+				if (gameStartTime) {
+					const elapsed = Date.now() - gameStartTime;
+					const minutes = Math.floor(elapsed / 60000);
+					const seconds = Math.floor((elapsed % 60000) / 1000);
+					
+					const timerElement = document.getElementById('gameTimer');
+					if (timerElement) {
+						timerElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+					}
+				}
+			}, 1000);
+		}
+
+		function stopGameTimer()
+		{
+			console.log("Stopping game timer...");
+			if (gameTimerInterval) {
+				clearInterval(gameTimerInterval);
+				gameTimerInterval = null;
+			}
+			gameStartTime = null;
+			
+			const timerElement = document.getElementById('gameTimer');
+			if (timerElement) {
+				timerElement.textContent = '00:00';
+			}
+		}
+
+		function resetGameTimer()
+		{
+			console.log("Resetting game timer...");
+			stopGameTimer();
+			startGameTimer();
+		}
+
 		function submitGuess(guess)
 		{
 			connection.invoke('SubmitGuess', {guess: guess, code: code, username: username});
@@ -215,79 +652,156 @@
 		}
 	</script>
 }
-<div class="container">
-	<div class="align-content-center text-center">
-		<div class="row">
-			<div class="col"></div>
-			<div class="col">
-				<div class="h5">
-					Game Code: <span class="text-primary">@Model.Code<i class="bi bi-copy"></i></span>
+
+<div class="bg-gradient">
+	<div class="container" style="max-width: 1400px; margin: 0 auto;">
+		<!-- Compact Header -->
+		<div class="game-header">
+			<h2>
+				<i class="bi bi-controller"></i>
+				Trivio Game
+			</h2>
+			<div class="game-code">
+				<span>@Model.Code</span>
 					<i class="bi bi-copy"></i>
 				</div>
 			</div>
 
-			<div class="col card">
-				<div class="mt-1">
-					<h4><span class="badge bg-success">Oyuncular</span></h4>
-					<ul id="playerList" class="list-group mb-4">
-					</ul>
+		<!-- Main Game Layout -->
+		<div class="game-layout">
+			<!-- Sidebar: Players & Controls -->
+			<div class="sidebar-card">
+				<div class="sidebar-header">
+					<i class="bi bi-people-fill"></i>
+					Room Info
 				</div>
-				<div class="mt-1">
-					<h4><span class="badge bg-secondary">İzleyiciler</span></h4>
-					<ul id="spectatorList" class="list-group">
-					</ul>
-				</div>
-				<hr />
-				
-				@if (Model.IsAdmin)
-				{
-					<div class="mt-1">
-						<h4><span class="badge bg-secondary">Room Controls</span></h4>
-						<div class="row">
-							<div class="col"> 
-								<button class="btn btn-primary mt-4" onclick="closeTheGame()">Close The Game</button>
-							</div>
-							<div class="col">
-								<button class="btn btn-primary mt-4" onclick="startTheGame(true)">Start The Game</button>
-							</div>
+				<div class="sidebar-body">
+					<!-- Players Section -->
+					<div class="user-section">
+						<div class="user-section-title">
+							<i class="bi bi-person-check"></i>
+							Players
+						</div>
+						<div id="playerList" class="user-list">
+							<!-- Players will be added here -->
 						</div>
 					</div>
-				}
-			</div>
-
-		</div>
-		<div id="roundArea" style="display:none;">
-			<div class="mb-3">
-				<h5 id="gameProgress" class="text-muted">Round 1 of 10</h5>
-			</div>
-			<div class="mb-3">
-				<h6 id="gameInstructions" class="text-info">Use only these consonants:</h6>
-				<div id="consonantsDisplay" class="mb-3">
-					<!-- Consonants will be displayed here -->
+					
+					<!-- Spectators Section -->
+					<div class="user-section">
+						<div class="user-section-title">
+							<i class="bi bi-eye"></i>
+							Spectators
+						</div>
+						<div id="spectatorList" class="user-list">
+							<!-- Spectators will be added here -->
+						</div>
+				</div>
+				
+					<!-- Admin Controls -->
+				@if (Model.IsAdmin)
+				{
+						<div class="admin-controls">
+							<h5>
+								<i class="bi bi-gear"></i>
+								Controls
+							</h5>
+							<button class="btn btn-success" onclick="startTheGame(true)">
+								<i class="bi bi-play-fill"></i>
+								Start Game
+							</button>
+							<button class="btn btn-outline-danger" onclick="closeTheGame()">
+								<i class="bi bi-stop-fill"></i>
+								Close Game
+							</button>
+						</div>
+					}
 				</div>
 			</div>
-			<input type="text" id="guessInput" placeholder="Type a word using only the consonants above..." class="form-control mb-3">
-			<div id="messageArea"></div>
-		</div>
 
-		<!-- Game Completion Modal -->
-		<div class="modal fade" id="gameCompletionModal" tabindex="-1" aria-labelledby="gameCompletionModalLabel" aria-hidden="true">
-			<div class="modal-dialog modal-lg">
-				<div class="modal-content">
-					<div class="modal-header bg-success text-white">
-						<h5 class="modal-title" id="gameCompletionModalLabel">Game Completed!</h5>
-						<button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+			<!-- Game Area -->
+			<div>
+				<!-- Active Game Area -->
+				<div id="roundArea" style="display:none;" class="game-card">
+					<div class="game-header-bar">
+						<h4>
+							<i class="bi bi-trophy"></i>
+							Consonant Challenge
+						</h4>
+						<div class="game-timer">
+							<i class="bi bi-clock"></i>
+							<span id="gameTimer">00:00</span>
+						</div>
 					</div>
-					<div class="modal-body" id="modalBody">
-						<!-- Modal content will be populated by JavaScript -->
+					<div class="game-content">
+						<!-- Progress Section -->
+						<div class="progress-section">
+							<div id="gameProgress" class="round-number">
+								Round 1 of 10
+							</div>
+							<div class="progress-bar-container">
+								<div id="progressBar" class="progress-bar" role="progressbar" style="width: 10%" aria-valuenow="1" aria-valuemin="0" aria-valuemax="10"></div>
+							</div>
+						</div>
+						
+						<!-- Instructions -->
+						<div class="instructions">
+							<h5 id="gameInstructions">
+								Use only these consonants:
+							</h5>
+						</div>
+						
+						<!-- Consonants Display -->
+						<div class="consonants-container">
+							<div id="consonantsDisplay">
+								<!-- Consonants will be displayed here -->
+							</div>
+						</div>
+						
+						<!-- Input Area -->
+						<div class="input-area">
+							<input type="text" 
+								   id="guessInput" 
+								   class="guess-input"
+								   placeholder="Type a word using only the consonants above..." 
+								   autocomplete="off">
+						</div>
+						
+						<!-- Message Area -->
+						<div id="messageArea">
+							<!-- Messages will be displayed here -->
+						</div>
 					</div>
-					<div class="modal-footer">
-						<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-						<button type="button" class="btn btn-primary" onclick="location.reload()">Play Again</button>
-					</div>
-				</div>
 			</div>
+
+				<!-- Waiting Area -->
+				<div id="waitingArea" class="waiting-card">
+					<div class="waiting-icon">
+						<i class="bi bi-hourglass-split"></i>
+					</div>
+					<h3>Waiting for game to start...</h3>
+					<p>The room admin will start the game when ready.</p>
+				</div>
+		</div>
 		</div>
 	</div>
 </div>
 
+<!-- Game Completion Modal -->
+<div class="modal fade" id="gameCompletionModal" tabindex="-1" aria-labelledby="gameCompletionModalLabel" aria-hidden="true">
+	<div class="modal-dialog modal-lg">
+		<div class="modal-content">
+			<div class="modal-header" style="background: var(--success); color: white;">
+				<h5 class="modal-title" id="gameCompletionModalLabel">Game Completed!</h5>
+				<button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+			</div>
+			<div class="modal-body" id="modalBody">
+				<!-- Modal content will be populated by JavaScript -->
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-outline-danger" data-bs-dismiss="modal">Close</button>
+				<button type="button" class="btn btn-success" onclick="location.reload()">Play Again</button>
+			</div>
+		</div>
+	</div>
+</div>

@@ -35,7 +35,6 @@ namespace Trivio.Pages
             {
                 Username = "Guest"; // Default username if none provided
             }
-            Console.WriteLine("Username on cshtml: " + Username);
             //Code validation here. 
         }
     }
