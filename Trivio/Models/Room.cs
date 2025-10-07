@@ -12,6 +12,7 @@ namespace Trivio.Models
         public string? OwnerConnectionId { get; set; }
         public Roles OwnerRole { get; set; } = Roles.Player;
         public ConcurrentDictionary<string, (string Username, Roles Role)> Connections { get; } = new();
+        public DateTime RoundStartedAt { get; set; }
         public bool IsClosed { get; set; }
         
         // Game state properties

@@ -10,4 +10,8 @@
     <None Include="wwwroot\data\tr_words.csv" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="wwwroot\signalR\" />
+  </ItemGroup>
+
 </Project>

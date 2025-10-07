@@ -21,7 +21,13 @@ namespace Trivio.Hubs
         public string Code { get; set; }
         public string Username { get; set; }
     }
-
+    public class RoundData
+    {
+        public int RoundNumber { get; set; }
+        public List<char> Consonants { get; set; }
+        public string Message { get; set; }
+        public DateTime RoundStartedAt { get; set; }
+    }
     public class ShareTypingInputData
     {
         public string Username { get; set; }
@@ -248,6 +254,17 @@ namespace Trivio.Hubs
                 _logger.LogInformation("User {Username} successfully joined room {RoomCode} as {Role}", username, code, role);
                 await Clients.Group(code.ToString()).SendAsync("UserJoined", username, role);
                 await Clients.Caller.SendAsync("JoinSuccess", code, role);
+                
+                if(room!.GameStarted)
+                {
+                    _logger.LogInformation("User {Username} is joining a room with a game started", username);
+                    var roomState = new RoundData();
+                    roomState.Consonants = room.CurrentConsonants;
+                    roomState.RoundNumber = room.RoundNumber;
+                    roomState.Message = "Wait for current game to end.";
+                    roomState.RoundStartedAt = room.RoundStartedAt; // Use the actual round start time from room
+                    await Clients.Client(Context.ConnectionId).SendAsync("GetRoomState", roomState);//To send the state of the room.
+                }
             }
             catch (Exception ex)
             {
@@ -272,6 +289,7 @@ namespace Trivio.Hubs
             room.GameStarted = true;
             room.GameCompleted = false;
             room.RoundNumber = 1;
+            room.RoundStartedAt = DateTime.UtcNow;
 
             // Start with the first round of consonants
             await StartNewRound(code);
@@ -289,10 +307,14 @@ namespace Trivio.Hubs
             // Get 5 random consonants
             room.CurrentConsonants = _wordService.GetRandomConsonants(5);
             
+            // Update the round start time in the room state
+            room.RoundStartedAt = DateTime.Now;
+            
             await Clients.Group(code.ToString()).SendAsync("RoundStarted", new { 
                 consonants = room.CurrentConsonants.ToArray(),
                 roundNumber = room.RoundNumber,
-                message = $"Round {room.RoundNumber}: Use only these consonants: {string.Join(", ", room.CurrentConsonants.Select(c => char.ToUpper(c)))}"
+                message = $"Round {room.RoundNumber}: Use only these consonants: {string.Join(", ", room.CurrentConsonants.Select(c => char.ToUpper(c)))}",
+                roundStartedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             });
         }
 

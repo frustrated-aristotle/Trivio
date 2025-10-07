@@ -75,10 +75,6 @@
 			const spectatorGridArea = document.getElementById('spectatorGridArea');
 			const guessInput = document.getElementById('guessInput');
 			
-			console.log("initializeRoleBasedUI called with role:", role);
-			console.log("playerInputArea found:", !!playerInputArea);
-			console.log("spectatorGridArea found:", !!spectatorGridArea);
-			
 			if (role === 'spectator') {
 				console.log("Setting up spectator UI");
 				// Show spectator grid, hide player input
@@ -88,34 +84,31 @@
 				}
 				if (playerInputArea) {
 					playerInputArea.style.display = 'none';
-					console.log("Hid player input area");
 				}
 			} else {
-				console.log("Setting up player UI");
 				// Show player input, hide spectator grid
 				if (playerInputArea) {
 					playerInputArea.style.display = 'block';
-					console.log("Showed player input area");
 				}
 				if (spectatorGridArea) {
 					spectatorGridArea.style.display = 'none';
-					console.log("Hid spectator grid");
 				}
 				
 				// Focus input for players and add typing event listener
 				if (guessInput) {
 					guessInput.focus();
-					console.log("Focused guess input");
 					
 					// Add typing event listener for players
 					guessInput.addEventListener('input', function() {
-						console.log("Typing input:", guessInput.value);
-						connection.invoke('ShareTypingInput', {username: username, input: guessInput.value, code: code});
+						shareTypingInput(guessInput);
 					});
 				}
 			}
 		}
 
+		function shareTypingInput(guessInput){
+			connection.invoke('ShareTypingInput', {username: username, input: guessInput.value, code: code});
+		}
 
 		// Find the card that belongs to the current user
 		function findCurrentUserCard() {
@@ -449,9 +442,9 @@
 
 		connection.on("ReceiveUserList", function(users)
 		{
-			console.log("Existing users are received:", users);
 			users.forEach(user=>{
 				addUserToDom(user);
+				console.log("User ", user.username, " has ",user.points, " points.");
 			});
 			
 			// If we're a spectator, populate the player cards with existing users
@@ -461,25 +454,45 @@
 			}
 		});
 
-		// Round start: show consonants and focus input
-		connection.on("RoundStarted", function(payload){
+		connection.on("GetRoomState", function(payload)
+		{	
+			console.log("GetRoomState event received:", payload);
+			roundStarted(payload);
+		});
+		function roundStarted(payload)
+		{
 			const roundArea = document.getElementById('roundArea');
 			const waitingArea = document.getElementById('waitingArea');
 			
-			if (roundArea) { 
-				roundArea.style.display = 'flex'; 
+			// Convert DateTime to JavaScript timestamp
+			let roundStartedAt;
+			if (payload.roundStartedAt) {
+				// If it's already a Unix timestamp (from RoundStarted)
+				if (typeof payload.roundStartedAt === 'number') {
+					roundStartedAt = payload.roundStartedAt;
+				} else {
+					// If it's a DateTime string (from GetRoomState)
+					roundStartedAt = new Date(payload.roundStartedAt).getTime();
+				}
+			} else {
+				// Fallback to current time
+				roundStartedAt = Date.now();
+			}
+
+			if (roundArea) {
+				roundArea.style.display = 'flex';
 				roundArea.scrollIntoView({ behavior: 'smooth' });
 			}
 			if (waitingArea) { waitingArea.style.display = 'none'; }
-			
+
 			// Re-initialize role-based UI when game starts
 			initializeRoleBasedUI();
+			console.log("Round started at:", roundStartedAt);
 			
-			// Start the game timer when the first round begins
-			if (payload.roundNumber === 1) {
-				startGameTimer();
-			}
-			
+			// Restart the game timer for each new round
+			stopGameTimer(); // Stop any existing timer
+			startGameTimer(roundStartedAt); // Start fresh timer for this round
+
 			// Display consonants with better styling
 			const consonantsEl = document.getElementById('consonantsDisplay');
 			if (consonantsEl && payload.consonants) {
@@ -488,41 +501,46 @@
 				`).join('');
 				consonantsEl.innerHTML = consonantsHtml;
 			}
-			
+
 			// Update game progress and progress bar
 			if (payload.roundNumber) {
 				const progressEl = document.getElementById('gameProgress');
 				const progressBar = document.getElementById('progressBar');
-				
+
 				if (progressEl) {
 					progressEl.innerText = `Round ${payload.roundNumber} of 10`;
 				}
-				
+
 				if (progressBar) {
 					const progressPercent = (payload.roundNumber / 10) * 100;
 					progressBar.style.width = `${progressPercent}%`;
 					progressBar.setAttribute('aria-valuenow', payload.roundNumber);
 				}
 			}
-			
+
 			// Update instructions
 			const instructionsEl = document.getElementById('gameInstructions');
 			if (instructionsEl && payload.message) {
 				instructionsEl.innerText = payload.message;
 			}
-			
+
 			const currentInput = getCurrentUserInput();
-			if (currentInput) { 
-				currentInput.value = ''; 
-				currentInput.focus(); 
+			if (currentInput) {
+				currentInput.value = '';
+				currentInput.focus();
 			}
+		}
+
+		// Round start: show consonants and focus input
+		connection.on("RoundStarted", function(payload){
+			roundStarted(payload);
 		});
 
 		// Handle guess results
 		connection.on("GuessResult", function(payload) {
 			const maxNotifications = 5;
 			const notificationDuration = 3000;
-			
+
 			let containerEl = document.getElementById('notificationContainer');
 			if (!containerEl) {
 				containerEl = document.createElement('div');
@@ -550,7 +568,6 @@
 		});
 
 		connection.on("ReceiveTypingInput", function(username, input) {
-			console.log("Received typing input from:", username, "Input:", input);
 			if(role === 'spectator'){
 				// Find the player card that belongs to this username
 				const cardIndex = findCardIndexByUsername(username);
@@ -704,6 +721,8 @@
 					if (role !== 'spectator') {
 						const currentInput = getCurrentUserInput();
 						if (currentInput) {
+							//TODO: Publish the empty phase of the input. 
+							shareTypingInput("");
 							submitGuess(currentInput.value);
 						}
 					}
@@ -860,7 +879,6 @@
 				// Close the room - you might want to implement this in the hub
 				connection.invoke('CloseRoom', parseInt(code))
 					.then(function () {
-						console.log('Room close requested');
 						// Redirect to home page
 						setTimeout(() => {
 							window.location.href = '/';
@@ -886,10 +904,10 @@
 			}
 		}
 
-		function startGameTimer()
+		function startGameTimer(time)
 		{
-			console.log("Starting game timer...");
-			gameStartTime = Date.now();
+			console.log("Starting game timer with time:", time, "Current time:", Date.now());
+			gameStartTime = time;
 			
 			gameTimerInterval = setInterval(function() {
 				if (gameStartTime) {
@@ -907,7 +925,6 @@
 
 		function stopGameTimer()
 		{
-			console.log("Stopping game timer...");
 			if (gameTimerInterval) {
 				clearInterval(gameTimerInterval);
 				gameTimerInterval = null;
@@ -922,9 +939,8 @@
 
 		function resetGameTimer()
 		{
-			console.log("Resetting game timer...");
 			stopGameTimer();
-			startGameTimer();
+			startGameTimer(Date.now());
 		}
 
 		function submitGuess(guess)

@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.SignalR;
+﻿using System.Security.Principal;
+using Microsoft.AspNetCore.SignalR;
 using Trivio.Services;
 
 namespace Trivio.Filters

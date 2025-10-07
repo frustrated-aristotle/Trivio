@@ -46,6 +46,52 @@ public class GameHub : Hub
 - **Admin Controls**: Real-time room management (kick, close, start)
 - **Ownership Transfer**: Automatic admin role transfer when owner disconnects
 
+### ✅ What the app actually does via SignalR
+
+This section reflects the current, working SignalR behavior implemented in `Hubs/GameHub.cs` and used by `Pages/GamePage.cshtml`.
+
+- **Hub methods (server-called by client)**
+  - `CreateRoom(code, role, username)`: Creates a room in the registry and returns the provided `code`.
+  - `JoinRoom(code, role, username)`: Validates and joins the room. Adds the connection to groups: `code`, and role-scoped group (`code-players` or `code-spectators`). Sends:
+    - `ReceiveUserList(existingUsers)` only to the caller for pre-existing room members
+    - `UserJoined(username, role)` to the whole room
+    - `JoinSuccess(code, role)` to the caller
+    - If a round is in progress, `GetRoomState(roundData)` to the caller so late joiners can catch up
+  - `StartTheGame(code, wordCount)`: Owner-only. Initializes game state then starts round 1 by invoking `RoundStarted(...)` to the room.
+  - `SubmitGuess({ guess, code, username })`: Validates word against allowed consonants and the dictionary. On success:
+    - Updates the user's points
+    - Sends `GuessResult({ success: true, message, correctWord, guesser, pointsEarned })` to the room
+    - Sends `UserListUpdated(users)` with fresh scores
+    - Advances to the next round with `RoundStarted(...)`, or sends `GameCompleted(...)` after round 10
+    On failure, sends `GuessResult({ success: false, message })` to the caller, and a feedback `GuessResult` to others when word not found.
+  - `CloseRoom(code)`: Owner-only. Marks room closed and broadcasts `RoomClosed({ message, closedBy: 'owner' })`.
+  - `KickUser(code, targetUsername)`: Owner-only. Removes the user and broadcasts `UserKicked(targetUsername)`; kicked client receives `Kicked`.
+  - `ShareTypingInput({ username, input, code })`: Broadcasts `ReceiveTypingInput(username, input)` to others in the room. Used by spectators to live-view player typing in the 4-card grid.
+  - `LeaveRoom(code)`: Removes the connection from the room group.
+
+- **Server-to-client events (received by client)**
+  - Connection/Presence: `UserJoined`, `UserLeft`, `UserKicked`, `Kicked`, `OwnerChanged`, `YouAreNowOwner`
+  - Room lifecycle: `JoinSuccess`, `RoomClosed`, `ReceiveUserList`, `UserListUpdated`
+  - Gameplay: `RoundStarted`, `GetRoomState`, `GuessResult`, `GameCompleted`
+  - Typing share: `ReceiveTypingInput`
+
+- **Ownership transfer logic**
+  - If the owner disconnects, the server promotes the first remaining player to owner and updates their role to `admin` in the in-memory `GameUsers` list.
+  - Broadcasts `OwnerChanged({ newOwner, newOwnerConnectionId, message })` to the room and `YouAreNowOwner({ message, hasAdminControls: true })` to the new owner, prompting the client UI to reveal admin controls.
+
+- **Reconnection behavior**
+  - Clients auto-reconnect with delays. On reconnection, the client re-invokes `JoinRoom(code, role, username)` to re-enter groups and refresh state. If a round is active, the server sends `GetRoomState(roundData)` so the UI can restore the timer, consonants, and round number.
+
+- **Round lifecycle**
+  - `StartTheGame` → server sets `GameStarted = true`, `RoundNumber = 1`, then `RoundStarted({ consonants, roundNumber, message, roundStartedAt })` to the room.
+  - Each valid guess increments the scorer's `points = word.Length`, updates users via `UserListUpdated`, and either
+    - increments `RoundNumber` and sends the next `RoundStarted`, or
+    - after round 10, sends `GameCompleted({ message, totalRounds, gameCompleted: true })`.
+
+- **Groups used**
+  - Room group: ``{code}``
+  - Role groups: ``{code}-players``, ``{code}-spectators`` (prepared for role-targeted features)
+
 #### 4. **Advanced SignalR Patterns**
 
 **Hub Filters for Validation**:
