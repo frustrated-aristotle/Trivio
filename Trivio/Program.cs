@@ -2,11 +2,15 @@ using Microsoft.AspNetCore.SignalR;
 using Trivio.Filters;
 using Trivio.Hubs;
 using Trivio.Services;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddRazorPages();
+
+// Configure SignalR with Redis Backplane
+var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
 builder.Services.AddSignalR(options =>
     { 
         options.AddFilter<RoomValidationFilter>();
@@ -15,7 +19,28 @@ builder.Services.AddSignalR(options =>
         options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
         options.HandshakeTimeout = TimeSpan.FromSeconds(15);
     }
-);
+).AddStackExchangeRedis(redisConnectionString, options =>
+{
+    // Configure Redis backplane options
+    options.Configuration.ChannelPrefix = RedisChannel.Literal("Trivio"); // Prefix for Redis channels
+    options.Configuration.AbortOnConnectFail = false; // Don't abort on connection failures
+    options.Configuration.ConnectRetry = 3; // Retry connection attempts
+    options.Configuration.ConnectTimeout = 5000; // 5 second connection timeout
+});
+
+// Add Redis services
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+{
+    var connectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
+    return ConnectionMultiplexer.Connect(connectionString);
+});
+
+builder.Services.AddStackExchangeRedisCache(options =>
+{
+    options.Configuration = builder.Configuration.GetConnectionString("Redis");
+    options.InstanceName = builder.Configuration["Redis:InstanceName"];
+});
+
 builder.Services.AddSingleton<IRoomRegistry, RoomRegistry>();
 builder.Services.AddSingleton<RoomValidationFilter>();
 builder.Services.AddSingleton<IWordService, WordService>();

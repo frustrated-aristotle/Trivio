@@ -417,3 +417,12 @@ These additional features would significantly enhance your SignalR demonstration
 - **Real-world Application** (chat, timers, live updates)
 
 Your current implementation already shows strong SignalR fundamentals with room management, real-time updates, and connection handling. Adding some of these features would make it an even more impressive portfolio piece!
+
+## Planned Features
+
+# Pause/resume by owner
+A game can be paused by the admin. Also it can be demanded by any user. 
+
+# Private Room
+Normal room has no password. But private room has a password. Only users have code and password can join these rooms. 
+
