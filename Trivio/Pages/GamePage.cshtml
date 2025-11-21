@@ -440,17 +440,44 @@
 			}, 5000);
 		});
 
+		connection.on("JoinSuccess", function(code, role) {
+			console.log("Successfully joined room", code, "as", role);
+		});
+
 		connection.on("ReceiveUserList", function(users)
 		{
-			users.forEach(user=>{
+			console.log("ReceiveUserList event received with", users.length, "users");
+			
+			// Clear existing user lists first to avoid duplicates
+			const playerList = document.getElementById('playerList');
+			const spectatorList = document.getElementById('spectatorList');
+			
+			if (playerList) playerList.innerHTML = '';
+			if (spectatorList) spectatorList.innerHTML = '';
+			
+			// Deduplicate users by username before adding (client-side safety check)
+			const uniqueUsers = [];
+			const seenUsernames = new Set();
+			
+			users.forEach(user => {
+				if (!seenUsernames.has(user.username)) {
+					seenUsernames.add(user.username);
+					uniqueUsers.push(user);
+					console.log("Adding unique user: ", user.username, " (", user.points, " points)");
+				} else {
+					console.warn("Duplicate user detected in ReceiveUserList:", user.username, "- skipping");
+				}
+			});
+			
+			// Add all unique users
+			uniqueUsers.forEach(user=>{
 				addUserToDom(user);
-				console.log("User ", user.username, " has ",user.points, " points.");
 			});
 			
 			// If we're a spectator, populate the player cards with existing users
 			if (role === 'spectator') {
 				console.log("Spectator role detected, populating player cards with existing users");
-				populatePlayerCards(users);
+				populatePlayerCards(uniqueUsers);
 			}
 		});
 
@@ -734,6 +761,14 @@
 			let role = user.role;
 			const listId = role === "player" ? "playerList" : "spectatorList";
 			const listElement = document.getElementById(listId);
+			
+			// Check if user already exists in the list (prevent duplicates)
+			const existingItems = listElement.querySelectorAll(`[data-username="${username}"]`);
+			if (existingItems.length > 0) {
+				console.warn("User", username, "already exists in", listId, "- skipping duplicate");
+				return; // User already exists, don't add again
+			}
+			
 			const listItem = document.createElement("div");
 			listItem.className = "user-item";
 			listItem.setAttribute('data-username', username);

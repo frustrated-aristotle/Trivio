@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Text.Json.Serialization;
 using Trivio.Enums;
 
 namespace Trivio.Models
@@ -11,7 +12,35 @@ namespace Trivio.Models
         public int Capacity { get; set; } = 8;
         public string? OwnerConnectionId { get; set; }
         public Roles OwnerRole { get; set; } = Roles.Player;
+        
+        // Read-only Connections dictionary (used at runtime)
+        [JsonIgnore]
         public ConcurrentDictionary<string, (string Username, Roles Role)> Connections { get; } = new();
+        
+        // Serializable property for Connections (used for Redis serialization)
+        [JsonPropertyName("connections")]
+        public Dictionary<string, ConnectionInfo> ConnectionsData 
+        { 
+            get 
+            {
+                return Connections.ToDictionary(
+                    kvp => kvp.Key, 
+                    kvp => new ConnectionInfo { Username = kvp.Value.Username, Role = kvp.Value.Role }
+                );
+            }
+            set
+            {
+                Connections.Clear();
+                if (value != null)
+                {
+                    foreach (var kvp in value)
+                    {
+                        Connections[kvp.Key] = (kvp.Value.Username, kvp.Value.Role);
+                    }
+                }
+            }
+        }
+        
         public DateTime RoundStartedAt { get; set; }
         public bool IsClosed { get; set; }
         
@@ -25,5 +54,12 @@ namespace Trivio.Models
         // New consonant game properties
         public List<char> CurrentConsonants { get; set; } = new();
         public int RoundNumber { get; set; } = 1;
+    }
+    
+    // Helper class for serializing connections
+    public class ConnectionInfo
+    {
+        public string Username { get; set; } = string.Empty;
+        public Roles Role { get; set; }
     }
 }

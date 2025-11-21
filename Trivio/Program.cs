@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
 using Trivio.Filters;
 using Trivio.Hubs;
 using Trivio.Services;
@@ -33,6 +34,13 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 {
     var connectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
     return ConnectionMultiplexer.Connect(connectionString);
+});
+
+// Register IDatabase for RoomRegistry
+builder.Services.AddSingleton<IDatabase>(sp =>
+{
+    var redis = sp.GetRequiredService<IConnectionMultiplexer>();
+    return redis.GetDatabase();
 });
 
 builder.Services.AddStackExchangeRedisCache(options =>

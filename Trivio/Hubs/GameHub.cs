@@ -220,23 +220,62 @@ namespace Trivio.Hubs
                     throw new HubException(reason ?? "Join failed");
                 }
 
+                // Small delay to ensure Redis has synced the connection update (removal of old connections + addition of new)
+                await Task.Delay(200);
+
+                // Refresh room from Redis to get latest connections from all servers
+                var room = _roomRegistry.RefreshRoomFromRedis(code);
+                if (room == null)
+                {
+                    throw new HubException("Room not found after joining");
+                }
+
+                _logger.LogInformation("Room {RoomCode} refreshed after join, has {ConnectionCount} connections", 
+                    code, room.Connections.Count);
+
                 // If owner not set, first joiner becomes owner
-                var room = _roomRegistry.GetRoom(code);
-                if (room != null && string.IsNullOrEmpty(room.OwnerConnectionId))
+                if (string.IsNullOrEmpty(room.OwnerConnectionId))
                 {
                     room.OwnerConnectionId = Context.ConnectionId;
+                    _roomRegistry.UpdateRoomState(room);
                     _logger.LogInformation("User {Username} became owner of room {RoomCode}", username, code);
                 }
 
-                // 1. Yeni Kullanıcıyı Veri Yapısına Ekleme
-                if (!GameUsers.ContainsKey(code.ToString()))
+                // 1. Build user list from Room.Connections (which is synced via Redis)
+                var existingUsers = new List<User>();
+                
+                // Log for debugging
+                _logger.LogInformation("Room {RoomCode} has {ConnectionCount} connections after join", code, room.Connections.Count);
+                
+                // Get ALL users from Room.Connections (includes users from all servers)
+                foreach (var connection in room.Connections)
                 {
-                    GameUsers[code.ToString()] = new List<User>();
+                    _logger.LogDebug("Processing connection: {ConnectionId}, User: {Username}, Role: {Role}", 
+                        connection.Key, connection.Value.Username, connection.Value.Role);
+                    
+                    existingUsers.Add(new User
+                    {
+                        ConnectionId = connection.Key,
+                        Username = connection.Value.Username,
+                        Role = connection.Value.Role.ToString().ToLower(),
+                        Points = GetUserPoints(code.ToString(), connection.Value.Username)
+                    });
                 }
-                var existingUsers = GameUsers[code.ToString()].ToList();
-                GameUsers[code.ToString()].Add(newUser);
+                
+                _logger.LogInformation("Built user list with {UserCount} users for room {RoomCode}", existingUsers.Count, code);
 
-                await Clients.Caller.SendAsync("ReceiveUserList", existingUsers);
+                // Add new user to GameUsers for points tracking (per-server cache) if not already there
+                var codeKey = code.ToString();
+                if (!GameUsers.ContainsKey(codeKey))
+                {
+                    GameUsers[codeKey] = new List<User>();
+                }
+                
+                // Check if user already exists in GameUsers (avoid duplicates)
+                if (!GameUsers[codeKey].Any(u => u.ConnectionId == Context.ConnectionId))
+                {
+                    GameUsers[codeKey].Add(newUser);
+                }
 
                 //First, add all users to the room based on the game code.
                 await Groups.AddToGroupAsync(Context.ConnectionId, code.ToString());
@@ -252,7 +291,58 @@ namespace Trivio.Hubs
                 }
 
                 _logger.LogInformation("User {Username} successfully joined room {RoomCode} as {Role}", username, code, role);
-                await Clients.Group(code.ToString()).SendAsync("UserJoined", username, role);
+                
+                // Small delay to ensure Redis has synced the connection before broadcasting
+                await Task.Delay(150);
+                
+                // Refresh room again to get the absolute latest state from all servers
+                room = _roomRegistry.RefreshRoomFromRedis(code);
+                if (room == null)
+                {
+                    _logger.LogWarning("Room {RoomCode} not found after refresh", code);
+                    return;
+                }
+                
+                _logger.LogInformation("Refreshed room {RoomCode} from Redis, has {ConnectionCount} connections", 
+                    code, room.Connections.Count);
+                
+                // Rebuild the user list with the refreshed room data
+                // Use a dictionary to deduplicate by Username (same user might have multiple ConnectionIds from reconnections)
+                var usersDict = new Dictionary<string, User>();
+                foreach (var connection in room.Connections)
+                {
+                    var connectionUsername = connection.Value.Username;
+                    
+                    // Deduplicate by Username - if same username appears with different ConnectionIds, keep the latest
+                    if (!usersDict.ContainsKey(connectionUsername))
+                    {
+                        _logger.LogDebug("Adding user to list: {Username} ({ConnectionId})", 
+                            connectionUsername, connection.Key);
+                        
+                        usersDict[connectionUsername] = new User
+                        {
+                            ConnectionId = connection.Key,
+                            Username = connectionUsername,
+                            Role = connection.Value.Role.ToString().ToLower(),
+                            Points = GetUserPoints(codeKey, connectionUsername)
+                        };
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Duplicate username {Username} found in room {RoomCode} (ConnectionId: {ConnectionId}), keeping first occurrence", 
+                            connectionUsername, code, connection.Key);
+                    }
+                }
+                
+                var allUsers = usersDict.Values.ToList();
+                _logger.LogInformation("Sending {UserCount} unique users to caller for room {RoomCode}", allUsers.Count, code);
+                
+                // Send initial user list to the caller (they need it for initial render)
+                await Clients.Caller.SendAsync("ReceiveUserList", allUsers);
+                
+                // Send updated user list to ALL users in the room (including cross-server users)
+                await SendUpdatedUserList(code);
+                
                 await Clients.Caller.SendAsync("JoinSuccess", code, role);
                 
                 if(room!.GameStarted)
@@ -291,6 +381,9 @@ namespace Trivio.Hubs
             room.RoundNumber = 1;
             room.RoundStartedAt = DateTime.UtcNow;
 
+            // Save game state to Redis so other servers can see it
+            _roomRegistry.UpdateRoomState(room);
+
             // Start with the first round of consonants
             await StartNewRound(code);
         }
@@ -308,7 +401,10 @@ namespace Trivio.Hubs
             room.CurrentConsonants = _wordService.GetRandomConsonants(5);
             
             // Update the round start time in the room state
-            room.RoundStartedAt = DateTime.Now;
+            room.RoundStartedAt = DateTime.UtcNow;
+            
+            // Save round state to Redis so other servers can see it
+            _roomRegistry.UpdateRoomState(room);
             
             await Clients.Group(code.ToString()).SendAsync("RoundStarted", new { 
                 consonants = room.CurrentConsonants.ToArray(),
@@ -328,7 +424,8 @@ namespace Trivio.Hubs
             }
 
             var roomCode = int.Parse(guessData.Code);
-            var room = _roomRegistry.GetRoom(roomCode);
+            // Refresh room from Redis to get latest game state (in case it was updated on another server)
+            var room = _roomRegistry.RefreshRoomFromRedis(roomCode);
             if (room == null || !room.GameStarted || room.CurrentConsonants == null || room.CurrentConsonants.Count == 0)
             {
                 await Clients.Caller.SendAsync("GuessResult", new { success = false, message = "Game not started or no current consonants" });
@@ -388,6 +485,9 @@ namespace Trivio.Hubs
             // Send updated user list with points
             await SendUpdatedUserList(int.Parse(guessData.Code));
 
+            // Save updated room state (round number, game completion)
+            _roomRegistry.UpdateRoomState(room);
+
             // Check if we've reached the maximum rounds
             if (room.RoundNumber >= 10)
             {
@@ -398,22 +498,77 @@ namespace Trivio.Hubs
                     gameCompleted = true
                 });
                 room.GameCompleted = true;
+                
+                // Save final game state
+                _roomRegistry.UpdateRoomState(room);
                 return;
             }
 
             // Move directly to next round
             room.RoundNumber++;
+            
+            // Save room state to Redis before starting next round
+            _roomRegistry.UpdateRoomState(room);
+            
             await StartNewRound(roomCode);
         }
 
         private async Task SendUpdatedUserList(int roomCode)
         {
+            var room = _roomRegistry.GetRoom(roomCode);
+            if (room == null)
+            {
+                return;
+            }
+
             var codeKey = roomCode.ToString();
+            // Use a dictionary to deduplicate by Username (same user might have multiple ConnectionIds)
+            var usersDict = new Dictionary<string, User>();
+
+            // Build user list from Room.Connections (synced via Redis) and GameUsers (for points)
+            foreach (var connection in room.Connections)
+            {
+                var username = connection.Value.Username;
+                
+                // Deduplicate by Username - keep the first occurrence if same username appears multiple times
+                if (!usersDict.ContainsKey(username))
+                {
+                    var points = GetUserPoints(codeKey, username);
+                    
+                    usersDict[username] = new User
+                    {
+                        ConnectionId = connection.Key,
+                        Username = username,
+                        Role = connection.Value.Role.ToString().ToLower(),
+                        Points = points
+                    };
+                }
+                else
+                {
+                    _logger.LogDebug("Skipping duplicate username {Username} in room {RoomCode} (ConnectionId: {ConnectionId})", 
+                        username, roomCode, connection.Key);
+                }
+            }
+
+            var users = usersDict.Values.ToList();
+            _logger.LogDebug("Sending updated user list with {UserCount} unique users for room {RoomCode}", 
+                users.Count, roomCode);
+            
+            await Clients.Group(codeKey).SendAsync("UserListUpdated", users);
+        }
+
+        private int GetUserPoints(string codeKey, string username)
+        {
+            // Get points from GameUsers if available (per-server cache)
             if (GameUsers.ContainsKey(codeKey))
             {
-                var users = GameUsers[codeKey];
-                await Clients.Group(codeKey).SendAsync("UserListUpdated", users);
+                var user = GameUsers[codeKey].FirstOrDefault(u => u.Username == username);
+                if (user != null)
+                {
+                    return user.Points;
+                }
             }
+            return 0;
         }
 
         [HubMethodName("CloseRoom")]
