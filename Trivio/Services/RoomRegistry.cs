@@ -498,10 +498,13 @@ namespace Trivio.Services
                         code, connectionCount);
                     
                     // Log each connection for debugging
-                    foreach (var conn in room.Connections)
+                    if (room.Connections != null)
                     {
-                        _logger.LogDebug("Room {RoomCode} connection: {ConnectionId} -> {Username} ({Role})", 
-                            code, conn.Key, conn.Value.Username, conn.Value.Role);
+                        foreach (var conn in room.Connections)
+                        {
+                            _logger.LogDebug("Room {RoomCode} connection: {ConnectionId} -> {Username} ({Role})", 
+                                code, conn.Key, conn.Value.Username, conn.Value.Role);
+                        }
                     }
                 }
                 else

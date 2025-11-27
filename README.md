@@ -119,9 +119,12 @@ public class RoomValidationFilter : IHubFilter
 ### Backend
 - **.NET 9.0** - Latest framework features
 - **ASP.NET Core** - Web application framework
-- **SignalR** - Real-time commsunication
+- **SignalR** - Real-time communication with Redis backplane
+- **Redis** - Distributed caching and SignalR message broker
+- **StackExchange.Redis** - High-performance Redis client
 - **Razor Pages** - Server-side rendering
 - **Dependency Injection** - Service container management
+- **Docker** - Containerized Redis deployment
 
 ### Frontend
 - **JavaScript** - Client-side SignalR implementation
@@ -238,6 +241,82 @@ This project demonstrates proficiency in:
 - Turkish word dictionary contains 38,000+ words
 - Game supports up to 8 players per room
 - Spectators can watch but cannot participate in scoring
+## 🔴 Redis Integration & Distributed State
+
+This project utilizes Redis as a centralized backbone for distributed caching and real-time message synchronization. By decoupling state from individual server instances, the architecture supports high availability and horizontal scaling.
+
+### 🏗️ Architecture Overview
+
+The following diagram illustrates how Redis acts as the "State Source of Truth" and the SignalR Backplane, allowing multiple server instances to communicate seamlessly.
+
+```mermaid
+graph TD
+    Client_A[User A] --> LB[Load Balancer]
+    Client_B[User B] --> LB
+
+    subgraph "Application Layer"
+        Server_1[App Server 1]
+        Server_2[App Server 2]
+    end
+
+    LB --> Server_1
+    LB --> Server_2
+
+    subgraph "Data Layer"
+        Redis[(Redis Cluster)]
+    end
+
+    Server_1 -- "Pub/Sub (SignalR)" --> Redis
+    Server_2 -- "Pub/Sub (SignalR)" --> Redis
+    Server_1 -- "Distributed Cache" --> Redis
+    Server_2 -- "Distributed Cache" --> Redis
+
+    style Redis fill:#D82C20,stroke:#333,stroke-width:2px,color:#fff
+    style Client_A fill:#f9f,stroke:#333,stroke-width:2px
+    style Client_B fill:#f9f,stroke:#333,stroke-width:2px
+```
+
+### 🚀 Key Benefits
+
+| Feature | Description |
+|---------|-------------|
+| **Consistency** | Single Source of Truth. All servers share the exact same room and game state, preventing "split-brain" scenarios where users see different data. |
+| **Scalability** | Horizontal Growth. New server instances can be spun up instantly to handle increased traffic without losing state or fragmenting real-time connections. |
+| **Performance** | Low Latency. Utilizes fast in-memory data structures for caching, reducing database load and ensuring millisecond response times. |
+| **Fault Tolerance** | Resilience. The system survives individual server restarts. If an app instance crashes, the state remains safe in Redis, and users can reconnect to a new instance transparently. |
+
+### 📦 Dependencies
+
+The implementation relies on the following .NET libraries:
+
+- **StackExchange.Redis** - High-performance general Redis client.
+- **Microsoft.AspNetCore.SignalR.StackExchangeRedis** - Enables the SignalR backplane for multi-server broadcasting.
+- **Microsoft.Extensions.Caching.StackExchangeRedis** - Implementation of IDistributedCache for data storage.
+
+### ⚙️ Configuration Example
+
+Ensure your `appsettings.json` contains your connection string:
+
+```json
+{
+  "ConnectionStrings": {
+    "Redis": "localhost:6379,abortConnect=false"
+  }
+}
+```
+
+And register the services in `Program.cs`:
+
+```csharp
+// Add Redis Distributed Cache
+builder.Services.AddStackExchangeRedisCache(options => {
+    options.Configuration = builder.Configuration.GetConnectionString("Redis");
+});
+
+// Add SignalR with Redis Backplane
+builder.Services.AddSignalR()
+    .AddStackExchangeRedis(builder.Configuration.GetConnectionString("Redis"));
+```
 
 ## 🚀 Additional SignalR Features You Could Add
 
@@ -420,9 +499,6 @@ Your current implementation already shows strong SignalR fundamentals with room 
 
 ## Planned Features
 
-# Pause/resume by owner
-A game can be paused by the admin. Also it can be demanded by any user. 
-
-# Private Room
-Normal room has no password. But private room has a password. Only users have code and password can join these rooms. 
+- **Pause/resume by owner**: A game can be paused by the admin. Also it can be demanded by any user.
+- **Private Room**: Normal room has no password. But private room has a password. Only users with code and password can join these rooms. 
 

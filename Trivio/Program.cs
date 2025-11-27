@@ -68,11 +68,10 @@ app.UseHttpsRedirection();
 app.UseRouting();
 
 app.UseAuthorization();
-app.UseEndpoints(endpoints => 
-{
-    endpoints.MapRazorPages();
-    endpoints.MapHub<GameHub>("/gameHub");
-});
+
+// Map SignalR hub
+app.MapHub<GameHub>("/gameHub");
+
 app.MapStaticAssets();
 app.MapRazorPages()
    .WithStaticAssets();

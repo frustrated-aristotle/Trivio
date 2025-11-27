@@ -9,30 +9,30 @@ namespace Trivio.Hubs
 
     public class User
     {
-        public string ConnectionId { get; set; }
-        public string Username { get; set; } // Önemli: Gerçek ad
-        public string Role { get; set; }     // player veya spectator
+        public string ConnectionId { get; set; } = string.Empty;
+        public string Username { get; set; } = string.Empty; // Önemli: Gerçek ad
+        public string Role { get; set; } = string.Empty;     // player veya spectator
         public int Points { get; set; } = 0; // User's total points
     }
 
     public class GuessData
     {
-        public string Guess { get; set; }
-        public string Code { get; set; }
-        public string Username { get; set; }
+        public string Guess { get; set; } = string.Empty;
+        public string Code { get; set; } = string.Empty;
+        public string Username { get; set; } = string.Empty;
     }
     public class RoundData
     {
         public int RoundNumber { get; set; }
-        public List<char> Consonants { get; set; }
-        public string Message { get; set; }
+        public List<char> Consonants { get; set; } = new();
+        public string Message { get; set; } = string.Empty;
         public DateTime RoundStartedAt { get; set; }
     }
     public class ShareTypingInputData
     {
-        public string Username { get; set; }
-        public string Input { get; set; }
-        public string Code { get; set; }
+        public string Username { get; set; } = string.Empty;
+        public string Input { get; set; } = string.Empty;
+        public string Code { get; set; } = string.Empty;
     }
 
     public class GameHub : Hub
@@ -173,7 +173,7 @@ namespace Trivio.Hubs
             }
         }
 
-        private async Task CleanupEmptyRoom(int roomCode)
+        private Task CleanupEmptyRoom(int roomCode)
         {
             var room = _roomRegistry.GetRoom(roomCode);
             if (room != null && room.Connections.IsEmpty)
@@ -186,15 +186,16 @@ namespace Trivio.Hubs
                 
                 _logger.LogInformation("Cleaned up empty room {RoomCode}", roomCode);
             }
+            return Task.CompletedTask;
         }
 
         [HubMethodName("CreateRoom")]
-        public async Task<int> CreateRoom(int code, string role, string username)
+        public Task<int> CreateRoom(int code, string role, string username)
         {
             // Create room in registry
             Enum.TryParse<Roles>(role, true, out var parsedRole);
             _roomRegistry.CreateRoom(code, Context.ConnectionId, username, parsedRole);
-            return code;
+            return Task.FromResult(code);
         }
 
         [HubMethodName("JoinRoom")] //For the client, we may need to change it. 

@@ -12,7 +12,7 @@ namespace Trivio.Pages
 
         public bool IsAdmin { get; set; }
         public Roles Role { get; set; }
-        public string Username { get; set; }
+        public string Username { get; set; } = string.Empty;
         public void OnGet(int code)
         {
             Code = code;
