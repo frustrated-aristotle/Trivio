@@ -77,8 +77,34 @@
            if (!document.getElementById('hiddenRole').value) {
                document.getElementById('hiddenRole').value = selectedRole ?? 'player';
            }
+           // Get private room checkbox state
+           const privateRoomCheckbox = document.getElementById('privateRoom');
+           const isPrivateRoom = privateRoomCheckbox ? privateRoomCheckbox.checked : false;
+           document.getElementById('hiddenPrivateRoom').value = isPrivateRoom;
            document.getElementById('startForm').submit();
         }
+
+        // Handle private room checkbox toggle
+        document.addEventListener('DOMContentLoaded', function() {
+            const privateRoomCheckbox = document.getElementById('privateRoom');
+            const passwordFieldContainer = document.getElementById('passwordFieldContainer');
+            const hiddenPrivateRoom = document.getElementById('hiddenPrivateRoom');
+            
+            if (privateRoomCheckbox && passwordFieldContainer) {
+                privateRoomCheckbox.addEventListener('change', function() {
+                    if (this.checked) {
+                        passwordFieldContainer.style.display = 'block';
+                        if (hiddenPrivateRoom) hiddenPrivateRoom.value = 'true';
+                    } else {
+                        passwordFieldContainer.style.display = 'none';
+                        // Clear password field
+                        const passwordInput = document.getElementById('roomPassword');
+                        if (passwordInput) passwordInput.value = '';
+                        if (hiddenPrivateRoom) hiddenPrivateRoom.value = 'false';
+                    }
+                });
+            }
+        });
 
         function attendTheGame()
         {
@@ -110,7 +136,7 @@
     <div class='modal-dialog'>
         <div class='modal-content'>
         <div class='modal-header'>
-            <h5 class='modal-title' id='startModalLabel'>Start Game</h5>
+            <h5 class='modal-title' id='startModalLabel'>Create A Room</h5>
             <button type='button' class='btn-close' data-bs-dismiss='modal' aria-label='Close'></button>
         </div>
         <div class='modal-body'>
@@ -134,7 +160,17 @@
                                 <li><a class="dropdown-item" href="#" onclick="setRole('spectator')">Spectator</a></li>
                         </ul>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label">
+                            <input type="checkbox" id="privateRoom" /> Private Room
+                        </label>
+                    </div>
+                    <div class="mb-3" id="passwordFieldContainer" style="display: none;">
+                        <label for="roomPassword" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="roomPassword" name="password" placeholder="Enter room password" />
+                    </div>
                     <input type='hidden' id='hiddenIsAdmin' name='isAdmin' value='true' />
+                    <input type='hidden' id='hiddenPrivateRoom' name='privateRoom' value='false' />
                     <input type='hidden' id='hiddenRole' name='role' value='' />
                 </div>
             </form>
