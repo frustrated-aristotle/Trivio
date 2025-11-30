@@ -199,7 +199,7 @@ namespace Trivio.Hubs
         }
 
         [HubMethodName("JoinRoom")] //For the client, we may need to change it. 
-        public async Task JoinRoom(int code, string role, string username)
+        public async Task JoinRoom(int code, string role, string username, string? password = null)
         {
             try
             {
@@ -213,10 +213,11 @@ namespace Trivio.Hubs
                     Role = role
                 };
 
-                // Validate/add via registry first
+                // Validate/add via registry first (password will be validated inside TryAddConnection if room is private)
                 Enum.TryParse<Roles>(role, true, out var parsedRole);
-                if (!_roomRegistry.TryAddConnection(code, Context.ConnectionId, username, parsedRole, out var reason))
+                if (!_roomRegistry.TryAddConnection(code, Context.ConnectionId, username, password, parsedRole, out var reason))
                 {
+                    _logger.LogInformation("Password {password}", password);
                     _logger.LogWarning("Failed to join room {RoomCode}: {Reason}", code, reason);
                     throw new HubException(reason ?? "Join failed");
                 }

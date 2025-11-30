@@ -13,6 +13,8 @@ namespace Trivio.Pages
         public bool IsAdmin { get; set; }
         public Roles Role { get; set; }
         public string Username { get; set; } = string.Empty;
+        public string? Password { get; set; }
+        
         public void OnGet(int code)
         {
             Code = code;
@@ -34,6 +36,12 @@ namespace Trivio.Pages
             else
             {
                 Username = "Guest"; // Default username if none provided
+            }
+            
+            // Read password if provided (for private rooms)
+            if (TempData.ContainsKey("Password"))
+            {
+                Password = TempData["Password"]?.ToString();
             }
             //Code validation here. 
         }

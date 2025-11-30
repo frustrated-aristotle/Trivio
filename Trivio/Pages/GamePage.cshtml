@@ -18,7 +18,7 @@
 		let username = sessionStorage.getItem('trivio_username') || "@Model.Username";
 		let currentUsername = username; // Alias for consistency
 		let isAdmin = @Model.IsAdmin.ToString().ToLower(); // Set initial admin status
-		
+		let roomPassword = "@(Model.Password ?? "")"; // Password for private rooms
 		// Game timer variables
 		let gameTimerInterval = null;
 		let gameStartTime = null;
@@ -48,8 +48,8 @@
 		connection.onreconnected((connectionId) => {
 			console.log('SignalR reconnected with connection ID:', connectionId);
 			showConnectionStatus('Connected', 'success');
-			// Rejoin the room after reconnection
-			connection.invoke('JoinRoom', parseInt(code), role, username)
+			// Rejoin the room after reconnection (pass password if exists)
+			connection.invoke('JoinRoom', parseInt(code), role, username, roomPassword || null)
 				.catch(err => console.error('Failed to rejoin room:', err));
 		});
 
@@ -62,10 +62,13 @@
 		.then(function(){
 			console.log('SignalR connected');
 			showConnectionStatus('Connected', 'success');
-			return connection.invoke('JoinRoom', parseInt(code), role, username);
+			// Pass password if provided (for private rooms)
+			console.log("password is: " + roomPassword);
+			return connection.invoke('JoinRoom', parseInt(code), role, username, roomPassword || null);
 		})
 		.catch(function (err) {
 			console.error('SignalR connection failed:', err);
+			console.log("Room password is " +roomPassword);
 			showConnectionStatus('Connection Failed', 'danger');
 		});
 

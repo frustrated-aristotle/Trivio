@@ -22,14 +22,16 @@ namespace Trivio.Services
             _database = database;
         }
 
-        public Room CreateRoom(int code, string ownerConnectionId, string ownerUsername, Roles ownerRole, int capacity = 8)
+        public Room CreateRoom(int code, string ownerConnectionId, string ownerUsername, Roles ownerRole, int capacity = 8, bool isPrivate = false, string? password = null)
         {
             var room = new Room
             {
                 Code = code,
                 Capacity = capacity,
                 OwnerConnectionId = ownerConnectionId,
-                OwnerRole = ownerRole
+                OwnerRole = ownerRole,
+                IsPrivate = isPrivate,
+                Password = isPrivate ? password : null
             };
 
             // Add connection to room only if connectionId is not empty
@@ -98,7 +100,7 @@ namespace Trivio.Services
             return room;
         }
 
-        public bool TryAddConnection(int code, string connectionId, string username, Roles role, out string? reason)
+        public bool TryAddConnection(int code, string connectionId, string username, string? password, Roles role, out string? reason)
         {
             reason = null;
             
@@ -174,6 +176,15 @@ namespace Trivio.Services
                 return false;
             }
 
+            // Validate password for private rooms
+            if (room.IsPrivate)
+            {
+                if (string.IsNullOrEmpty(password) || password != room.Password)
+                {
+                    reason = "Invalid password";
+                    return false;
+                }
+            }
             // Add connection to room
             room.Connections[connectionId] = (username, role);
 

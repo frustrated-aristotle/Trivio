@@ -12,7 +12,8 @@ namespace Trivio.Models
         public int Capacity { get; set; } = 8;
         public string? OwnerConnectionId { get; set; }
         public Roles OwnerRole { get; set; } = Roles.Player;
-        
+        public bool IsPrivate { get; set; } = false;
+        public string? Password { get; set; }
         // Read-only Connections dictionary (used at runtime)
         [JsonIgnore]
         public ConcurrentDictionary<string, (string Username, Roles Role)> Connections { get; } = new();
