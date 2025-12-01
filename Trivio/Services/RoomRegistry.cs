@@ -31,7 +31,7 @@ namespace Trivio.Services
                 OwnerConnectionId = ownerConnectionId,
                 OwnerRole = ownerRole,
                 IsPrivate = isPrivate,
-                Password = isPrivate ? password : null
+                Password = isPrivate && !string.IsNullOrEmpty(password) ? password.Trim() : null
             };
 
             // Add connection to room only if connectionId is not empty
@@ -49,7 +49,6 @@ namespace Trivio.Services
 
             // Save to memory cache
             _rooms[code] = room;
-
             // Save to Redis after connections are added
             try
             {
@@ -100,7 +99,7 @@ namespace Trivio.Services
             return room;
         }
 
-        public bool TryAddConnection(int code, string connectionId, string username, string? password, Roles role, out string? reason)
+        public bool TryAddConnection(int code, string connectionId, string username, string? password, Roles role, bool isAdmin, out string? reason)
         {
             reason = null;
             
@@ -177,13 +176,36 @@ namespace Trivio.Services
             }
 
             // Validate password for private rooms
-            if (room.IsPrivate)
+            if (room.IsPrivate && !isAdmin)
             {
-                if (string.IsNullOrEmpty(password) || password != room.Password)
+                // For private rooms, password is required and must match
+                if (string.IsNullOrEmpty(password))
                 {
-                    reason = "Invalid password";
+                    reason = "Password is required for private room";
+                    _logger.LogWarning("Password required for private room {RoomCode} but none provided", code);
                     return false;
                 }
+                
+                if (string.IsNullOrEmpty(room.Password))
+                {
+                    reason = "Room password not set";
+                    _logger.LogWarning("Private room {RoomCode} has no password set", code);
+                    return false;
+                }
+                
+                // Trim both passwords before comparison to handle whitespace
+                var trimmedPassword = password.Trim();
+                var trimmedRoomPassword = room.Password.Trim();
+                
+                if (trimmedPassword != trimmedRoomPassword)
+                {
+                    reason = "Invalid password";
+                    _logger.LogWarning("Invalid password for private room {RoomCode} (provided length: {ProvidedLength}, expected length: {ExpectedLength})", 
+                        code, trimmedPassword.Length, trimmedRoomPassword.Length);
+                    return false;
+                }
+                
+                _logger.LogInformation("Password validated successfully for private room {RoomCode}", code);
             }
             // Add connection to room
             room.Connections[connectionId] = (username, role);
@@ -531,7 +553,26 @@ namespace Trivio.Services
                 return null;
             }
         }
+#region User Side
+        //User Side
+        public List<RoomInfo> GetRoomInfos()
+        {
+            _logger.LogInformation("Fetching room infos from memory cache");
+            _logger.LogInformation("Total rooms in memory: {Count}", _rooms.Count);
+            return _rooms.Values.Select(static r => new RoomInfo
+            {
+                Code = r.Code,
+                Capacity = r.Capacity,
+                Connections = r.Connections.Count
+            }).ToList();
+        }
+#endregion
     }
 }
 
-
+public class RoomInfo
+{
+    public int Code { get; set; }
+    public int Capacity { get; set; }
+    public int Connections { get; set; }
+}

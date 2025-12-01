@@ -18,7 +18,9 @@ namespace Trivio.Pages
 
         public void OnGet()
         {
-
+            var roomInfos = _roomRegistry.GetRoomInfos();
+            ViewData["RoomInfos"] = roomInfos;
+            _logger.LogInformation("Room infos: {RoomInfos}", roomInfos);
         }
 
         public IActionResult OnPostStartGame(bool isAdmin, string role, string username, bool privateRoom = false, string? password = null)
@@ -29,7 +31,11 @@ namespace Trivio.Pages
             TempData["IsAdmin"] = isAdmin;
             TempData["Role"] = role;
             TempData["Username"] = username;
-            TempData["Password"] = password;
+            // Only store password if room is private and password is provided
+            if (privateRoom && !string.IsNullOrEmpty(password))
+            {
+                TempData["Password"] = password.Trim(); // Trim whitespace
+            }
 
             // Generate code on server to keep flow consistent and tamper-proof
             var random = new Random();
@@ -46,11 +52,6 @@ namespace Trivio.Pages
             TempData["IsAdmin"] = false; // attending users are not admins
             TempData["Role"] = role;
             TempData["Username"] = username;
-            // Store password in TempData so it can be used when joining via SignalR
-            if (!string.IsNullOrEmpty(password))
-            {
-                TempData["Password"] = password;
-            }
             
             // Validate room code lightly
             var code = roomCode;
@@ -71,12 +72,18 @@ namespace Trivio.Pages
             // If room is private, validate password
             if (room.IsPrivate)
             {
-                if (string.IsNullOrEmpty(password) || password != room.Password)
+                var trimmedPassword = string.IsNullOrEmpty(password) ? null : password.Trim();
+                var trimmedRoomPassword = string.IsNullOrEmpty(room.Password) ? null : room.Password.Trim();
+                
+                if (string.IsNullOrEmpty(trimmedPassword) || trimmedPassword != trimmedRoomPassword)
                 {
                     ModelState.AddModelError("password", "Invalid password for private room.");
                     TempData["ShowPasswordField"] = true;
                     return Page();
                 }
+                
+                // Store password in TempData so it can be used when joining via SignalR
+                TempData["Password"] = trimmedPassword;
             }
 
             return RedirectToPage("/GamePage", new { code });

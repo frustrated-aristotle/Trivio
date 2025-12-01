@@ -19,6 +19,13 @@
 		let currentUsername = username; // Alias for consistency
 		let isAdmin = @Model.IsAdmin.ToString().ToLower(); // Set initial admin status
 		let roomPassword = "@(Model.Password ?? "")"; // Password for private rooms
+		// Trim and convert empty string to null for SignalR
+		if (roomPassword) {
+			roomPassword = roomPassword.trim();
+		}
+		if (roomPassword === "") {
+			roomPassword = null;
+		}
 		// Game timer variables
 		let gameTimerInterval = null;
 		let gameStartTime = null;
@@ -49,7 +56,7 @@
 			console.log('SignalR reconnected with connection ID:', connectionId);
 			showConnectionStatus('Connected', 'success');
 			// Rejoin the room after reconnection (pass password if exists)
-			connection.invoke('JoinRoom', parseInt(code), role, username, roomPassword || null)
+			connection.invoke('JoinRoom', parseInt(code), role, username, isAdmin, roomPassword || null)
 				.catch(err => console.error('Failed to rejoin room:', err));
 		});
 
@@ -63,8 +70,7 @@
 			console.log('SignalR connected');
 			showConnectionStatus('Connected', 'success');
 			// Pass password if provided (for private rooms)
-			console.log("password is: " + roomPassword);
-			return connection.invoke('JoinRoom', parseInt(code), role, username, roomPassword || null);
+ 			return connection.invoke('JoinRoom', parseInt(code), role, username, isAdmin,roomPassword);
 		})
 		.catch(function (err) {
 			console.error('SignalR connection failed:', err);
