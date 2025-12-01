@@ -876,18 +876,23 @@
 			const adminControls = document.createElement('div');
 			adminControls.className = 'admin-controls';
 			adminControls.innerHTML = `
-				<h5>
-					<i class="bi bi-gear"></i>
-					Controls
-				</h5>
-				<div class="admin-buttons">
+				<div class="admin-header">
+					<div>
+						<h5 class="mb-1">
+							<i class="bi bi-gear me-1"></i>
+							Room controls
+						</h5>
+						<small class="text-muted">Start or close the game for everyone in this room.</small>
+					</div>
+				</div>
+				<div class="admin-buttons mt-3">
 					<button class="btn btn-success" onclick="startTheGame(true)">
 						<i class="bi bi-play-fill"></i>
-						Start Game
+						Start game
 					</button>
 					<button class="btn btn-outline-danger" onclick="closeTheGame()">
 						<i class="bi bi-stop-fill"></i>
-						Close Game
+						Close game
 					</button>
 				</div>
 			`;
