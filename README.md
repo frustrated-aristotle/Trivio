@@ -32,6 +32,17 @@ This will:
 - Expose Redis on `localhost:6379`
 - Persist data to a Docker volume (`redis_data`)
 
+#### Offline / air-gapped tip
+
+- The compose file pins the image to `redis:7.4-alpine`, so Docker never checks for `latest`.
+- Run the following **once while you have connectivity** and Docker will cache the layers for offline use:
+
+```bash
+docker pull redis:7.4-alpine
+```
+
+After that, `docker compose up -d` works even with Wi-Fi off because it uses the cached image only.
+
 You can verify Redis is up with:
 
 ```bash
