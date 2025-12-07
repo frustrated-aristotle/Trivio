@@ -115,6 +115,11 @@
 			}
 		}
 
+		const btn = document.getElementById("sendmsg");
+		btn.addEventListener("click", function(e){
+			text = "t";
+			connection.invoke('SendMessage', parseInt(code), username, text).catch(err => console.error("Failed to send a message:: " + err));
+			console.log("message sent: " + text);});
 		function shareTypingInput(guessInput){
 			connection.invoke('ShareTypingInput', {username: username, input: guessInput.value, code: code});
 		}
@@ -494,6 +499,11 @@
 		{	
 			console.log("GetRoomState event received:", payload);
 			roundStarted(payload);
+		});
+
+		connection.on("MessageReceived", function(payload)
+		{
+			console.log("Message received: ", payload);	
 		});
 		function roundStarted(payload)
 		{
@@ -1114,6 +1124,15 @@
 			console.log("Found users from sidebar:", users);
 			populatePlayerCards(users);
 		};
+
+		//int code,string senderUsername, string message
+		function SendMessage(text)
+		{
+			//connection.invoke('JoinRoom', parseInt(code), role, username, isAdmin, roomPassword || null).catch(err => console.error('Failed to rejoin room:', err))
+			connection.invoke('SendMessage', parseInt(code), username, text).catch(err => console.error("Failed to send a message:: " + err));
+			console.log("message sent: " + text);
+
+		}
 	</script>
 }
 
@@ -1159,6 +1178,9 @@
 						</div>
 						<div id="spectatorList" class="user-list">
 							<!-- Spectators will be added here -->
+						</div>
+						<div>
+							<button id ="sendmsg" class="btn-info">Send Message</button>
 						</div>
 				</div>
 				

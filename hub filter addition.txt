@@ -1,0 +1,4 @@
+A hub filter is like a middleware in Asp.Net Core. 
+
+Since we have a mechanism for sending messages, we can use this filter for it.
+

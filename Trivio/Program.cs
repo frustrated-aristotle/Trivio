@@ -9,12 +9,12 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddRazorPages();
-
 // Configure SignalR with Redis Backplane
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
 builder.Services.AddSignalR(options =>
     { 
         options.AddFilter<RoomValidationFilter>();
+        options.AddFilter<WordRepeatValidationFilter>();
         options.EnableDetailedErrors = builder.Environment.IsDevelopment();
         options.KeepAliveInterval = TimeSpan.FromSeconds(15);
         options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
@@ -71,6 +71,7 @@ app.UseAuthorization();
 
 // Map SignalR hub
 app.MapHub<GameHub>("/gameHub");
+
 
 app.MapStaticAssets();
 app.MapRazorPages()

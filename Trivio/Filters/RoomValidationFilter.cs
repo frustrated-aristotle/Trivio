@@ -23,7 +23,7 @@ namespace Trivio.Filters
                 if (room == null)
                 {
                     Console.WriteLine("No room found.");
-                    throw new HubException("Room not found");
+                        throw new HubException("Room not found");
                 }
                 if (room.IsClosed)
                 {

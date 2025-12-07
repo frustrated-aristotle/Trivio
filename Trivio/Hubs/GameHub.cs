@@ -486,7 +486,8 @@ namespace Trivio.Hubs
             
             // Send updated user list with points
             await SendUpdatedUserList(int.Parse(guessData.Code));
-
+            
+            room.WordList.Add(word);
             // Save updated room state (round number, game completion)
             _roomRegistry.UpdateRoomState(room);
 
@@ -648,7 +649,25 @@ namespace Trivio.Hubs
             await Clients.Client(target.ConnectionId).SendAsync("Kicked");
             await Clients.Group(codeKey).SendAsync("UserKicked", targetUsername);
         }
-
+        [HubMethodName("SendMessage")]
+        public async Task SendMessage(int code,string senderUsername, string message)
+        {
+            var room = _roomRegistry.GetRoom(code);
+            List<string> data = new List<string> {senderUsername, message };
+            if(room == null)
+            {
+                throw new HubException("Room not found");
+            }
+            var codeKey = code.ToString();
+            
+            await Clients.Group(codeKey).SendAsync("MessageReceived", new
+            {
+                _code = code,
+                username = senderUsername,
+                msg = message
+            });
+        }
+        
         public async Task LeaveRoom(int code)
         {
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, code.ToString());
