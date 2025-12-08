@@ -12,6 +12,7 @@ namespace Trivio.Hubs
 
     public class User
     {
+        public string UserId { get; set; } = string.Empty;
         public string ConnectionId { get; set; } = string.Empty;
         public string Username { get; set; } = string.Empty; // Önemli: Gerçek ad
         public string Role { get; set; } = string.Empty;     // player veya spectator
@@ -83,8 +84,8 @@ namespace Trivio.Hubs
                         var room = _roomRegistry.GetRoom(roomCode);
                         if (room != null)
                         {
-                            // Check if the disconnected user was the room owner
-                            bool wasOwner = room.OwnerConnectionId == Context.ConnectionId;
+                            // Check if the disconnected user was the room owner (by userId)
+                            bool wasOwner = !string.IsNullOrEmpty(room.OwnerUserId) && room.OwnerUserId == userToRemove.UserId;
                             
                             _roomRegistry.RemoveConnection(roomCode, Context.ConnectionId);
                             roomsToNotify.Add(roomCode);
@@ -125,6 +126,7 @@ namespace Trivio.Hubs
                 // Transfer ownership to the first remaining player
                 var newOwner = playerUsers.First();
                 room.OwnerConnectionId = newOwner.ConnectionId;
+                room.OwnerUserId = newOwner.UserId;
                 room.OwnerRole = Enums.Roles.Player;
                 
                 // Update the new owner's role to admin in GameUsers
@@ -234,6 +236,7 @@ namespace Trivio.Hubs
 
                 var newUser = new User
                 {
+                    UserId = userId,
                     ConnectionId = Context.ConnectionId,
                     Username = usernameFromToken,
                     Role = roleClaim
@@ -284,10 +287,11 @@ namespace Trivio.Hubs
                     
                     existingUsers.Add(new User
                     {
+                        UserId = connection.Value.UserId,
                         ConnectionId = connection.Key,
                         Username = connection.Value.Username,
                         Role = connection.Value.Role.ToString().ToLower(),
-                        Points = GetUserPoints(code.ToString(), connection.Value.Username)
+                        Points = GetUserPoints(code.ToString(), connection.Value.UserId, connection.Value.Username)
                     });
                 }
                 
@@ -352,10 +356,11 @@ namespace Trivio.Hubs
                         
                         usersDict[dedupeKey] = new User
                         {
+                            UserId = connectionUserId,
                             ConnectionId = connection.Key,
                             Username = connectionUsername,
                             Role = connection.Value.Role.ToString().ToLower(),
-                            Points = GetUserPoints(codeKey, connectionUsername)
+                            Points = GetUserPoints(codeKey, connectionUserId, connectionUsername)
                         };
                     }
                     else
@@ -572,10 +577,11 @@ namespace Trivio.Hubs
                 // Deduplicate by UserId (fallback to username) - keep the first occurrence if same user appears multiple times
                 if (!usersDict.ContainsKey(dedupeKey))
                 {
-                    var points = GetUserPoints(codeKey, username);
+                    var points = GetUserPoints(codeKey, userId, username);
                     
                     usersDict[dedupeKey] = new User
                     {
+                        UserId = userId,
                         ConnectionId = connection.Key,
                         Username = username,
                         Role = connection.Value.Role.ToString().ToLower(),
@@ -596,12 +602,12 @@ namespace Trivio.Hubs
             await Clients.Group(codeKey).SendAsync("UserListUpdated", users);
         }
 
-        private int GetUserPoints(string codeKey, string username)
+        private int GetUserPoints(string codeKey, string userId, string username)
         {
             // Get points from GameUsers if available (per-server cache)
             if (GameUsers.ContainsKey(codeKey))
             {
-                var user = GameUsers[codeKey].FirstOrDefault(u => u.Username == username);
+                var user = GameUsers[codeKey].FirstOrDefault(u => (!string.IsNullOrWhiteSpace(userId) && u.UserId == userId) || u.Username == username);
                 if (user != null)
                 {
                     return user.Points;
@@ -664,9 +670,8 @@ namespace Trivio.Hubs
             var groupName = data.Code.Trim();
             await Clients.OthersInGroup(groupName).SendAsync("ReceiveTypingInput", data.Username, data.Input);
         }
-        [Authorize(Roles = "admin")]
         [HubMethodName("KickUser")]
-        public async Task KickUser(int code, string targetUsername)
+        public async Task KickUser(int code, string targetUserId, string targetUsername)
         {
             var callerUserId = Context.User?.FindFirst("userId")?.Value;
             if (string.IsNullOrWhiteSpace(callerUserId))
@@ -684,11 +689,15 @@ namespace Trivio.Hubs
                 throw new HubException("Only the room owner can kick users");
             }
 
-            // Find target connection by username
+            // Find target connection by userId first, fallback to username
             var codeKey = code.ToString();
             if (!GameUsers.ContainsKey(codeKey)) return;
             var list = GameUsers[codeKey];
-            var target = list.FirstOrDefault(u => string.Equals(u.Username, targetUsername, StringComparison.OrdinalIgnoreCase));
+
+            var target = list.FirstOrDefault(u => 
+                (!string.IsNullOrWhiteSpace(targetUserId) && u.UserId == targetUserId) ||
+                (!string.IsNullOrWhiteSpace(targetUsername) && string.Equals(u.Username, targetUsername, StringComparison.OrdinalIgnoreCase)));
+
             if (target == null) return;
 
             // Remove from registry and memory list
@@ -698,7 +707,7 @@ namespace Trivio.Hubs
             // Remove from groups and notify
             await Groups.RemoveFromGroupAsync(target.ConnectionId, codeKey);
             await Clients.Client(target.ConnectionId).SendAsync("Kicked");
-            await Clients.Group(codeKey).SendAsync("UserKicked", targetUsername);
+            await Clients.Group(codeKey).SendAsync("UserKicked", new { userId = target.UserId, username = target.Username });
         }
         [HubMethodName("SendMessage")]
         public async Task SendMessage(int code,string senderUsername, string message)
