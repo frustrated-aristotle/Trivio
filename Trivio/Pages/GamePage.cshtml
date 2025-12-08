@@ -8,8 +8,11 @@
 @section Scripts{
 	<script>
 		let code = "@Model.Code";
+		window.token = "@Model.Token";
 		const connection = new signalR.HubConnectionBuilder()
-		.withUrl("/gameHub")
+		.withUrl("/gameHub", {
+			accessTokenFactory: () => window.token
+		})
 		.withAutomaticReconnect([0, 2000, 10000, 30000]) // Reconnect attempts with delays
 		.configureLogging(signalR.LogLevel.Information)
 		.build();

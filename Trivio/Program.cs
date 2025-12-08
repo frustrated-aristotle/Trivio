@@ -1,9 +1,12 @@
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.DependencyInjection;
 using Trivio.Filters;
 using Trivio.Hubs;
 using Trivio.Services;
 using StackExchange.Redis;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+using Trivio.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -49,9 +52,55 @@ builder.Services.AddStackExchangeRedisCache(options =>
     options.InstanceName = builder.Configuration["Redis:InstanceName"];
 });
 
+// Bind JWT options from configuration for TokenService
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+
 builder.Services.AddSingleton<IRoomRegistry, RoomRegistry>();
 builder.Services.AddSingleton<RoomValidationFilter>();
 builder.Services.AddSingleton<IWordService, WordService>();
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        var jwtSection = builder.Configuration.GetSection("Jwt");
+
+        var secretKey = jwtSection["SecretKey"] ?? throw new Exception("Missing SecretKey");
+        var issuer = jwtSection["Issuer"] ?? throw new Exception("Missing Issuer");
+        var audience = jwtSection["Audience"] ?? issuer;
+
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
+
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+
+            ValidIssuer = issuer,
+            ValidAudience = audience,
+            IssuerSigningKey = key,
+
+            ClockSkew = TimeSpan.FromMinutes(5)
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var token = context.Request.Query["access_token"];
+
+                if (!string.IsNullOrEmpty(token) &&
+                    context.Request.Path.StartsWithSegments("/gameHub"))
+                {
+                    context.Token = token;
+                }
+
+                return Task.CompletedTask;
+            }
+        };
+    });
+builder.Services.AddSingleton<TokenService>();
+builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
@@ -67,6 +116,7 @@ app.UseHttpsRedirection();
 
 app.UseRouting();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 // Map SignalR hub

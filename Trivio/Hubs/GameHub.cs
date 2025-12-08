@@ -1,7 +1,10 @@
-﻿using Microsoft.AspNetCore.SignalR;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 using Trivio.Enums;
 using Trivio.Models;
 using Trivio.Services;
+using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 
 namespace Trivio.Hubs
 {
@@ -34,7 +37,8 @@ namespace Trivio.Hubs
         public string Input { get; set; } = string.Empty;
         public string Code { get; set; } = string.Empty;
     }
-
+    [Authorize]
+    [Authorize]
     public class GameHub : Hub
     {
         private readonly IRoomRegistry _roomRegistry;
@@ -199,23 +203,45 @@ namespace Trivio.Hubs
         }
 
         [HubMethodName("JoinRoom")] //For the client, we may need to change it. 
-        public async Task JoinRoom(int code, string role, string username,bool isAdmin, string? password = null)
+        public async Task JoinRoom(int code, string role, string username, bool isAdmin, string? password = null)
         {
             try
             {
-                _logger.LogInformation("User {Username} attempting to join room {RoomCode} as {Role}", 
-                    username, code, role);
+                // Enforce claims-based identity (ignore client-supplied identity fields)
+                if (!Context.User?.Identity?.IsAuthenticated ?? true)
+                {
+                    throw new HubException("Unauthorized");
+                }
+
+                var roomClaim = Context.User.FindFirst("room")?.Value;
+                if (string.IsNullOrWhiteSpace(roomClaim) || !int.TryParse(roomClaim, out var roomFromToken) || roomFromToken != code)
+                {
+                    throw new HubException("Invalid room token");
+                }
+
+                var userId = Context.User.FindFirst("userId")?.Value;
+                if (string.IsNullOrWhiteSpace(userId))
+                {
+                    throw new HubException("Missing user identity");
+                }
+
+                var usernameFromToken = Context.User.FindFirst("username")?.Value ?? username;
+                var roleClaim = Context.User.FindFirst("role")?.Value ?? role;
+                var isAdminClaim = bool.TryParse(Context.User.FindFirst("isAdmin")?.Value, out var claimIsAdmin) && claimIsAdmin;
+
+                _logger.LogInformation("User {Username} attempting to join room {RoomCode} as {Role} (claims enforced)", 
+                    usernameFromToken, code, roleClaim);
 
                 var newUser = new User
                 {
                     ConnectionId = Context.ConnectionId,
-                    Username = username,
-                    Role = role
+                    Username = usernameFromToken,
+                    Role = roleClaim
                 };
 
                 // Validate/add via registry first (password will be validated inside TryAddConnection if room is private)
-                Enum.TryParse<Roles>(role, true, out var parsedRole);
-                if (!_roomRegistry.TryAddConnection(code, Context.ConnectionId, username, password, parsedRole, isAdmin, out var reason))
+                Enum.TryParse<Roles>(roleClaim, true, out var parsedRole);
+                if (!_roomRegistry.TryAddConnection(code, Context.ConnectionId, userId, usernameFromToken, password, parsedRole, isAdminClaim, out var reason))
                 {
                     _logger.LogInformation("Password {password}", password);
                     _logger.LogWarning("Failed to join room {RoomCode}: {Reason}", code, reason);
@@ -239,8 +265,9 @@ namespace Trivio.Hubs
                 if (string.IsNullOrEmpty(room.OwnerConnectionId))
                 {
                     room.OwnerConnectionId = Context.ConnectionId;
+                    room.OwnerUserId = userId;
                     _roomRegistry.UpdateRoomState(room);
-                    _logger.LogInformation("User {Username} became owner of room {RoomCode}", username, code);
+                    _logger.LogInformation("User {Username} became owner of room {RoomCode}", usernameFromToken, code);
                 }
 
                 // 1. Build user list from Room.Connections (which is synced via Redis)
@@ -309,19 +336,21 @@ namespace Trivio.Hubs
                     code, room.Connections.Count);
                 
                 // Rebuild the user list with the refreshed room data
-                // Use a dictionary to deduplicate by Username (same user might have multiple ConnectionIds from reconnections)
+                // Use a dictionary to deduplicate by UserId (same user might have multiple ConnectionIds from reconnections)
                 var usersDict = new Dictionary<string, User>();
                 foreach (var connection in room.Connections)
                 {
+                    var connectionUserId = connection.Value.UserId;
                     var connectionUsername = connection.Value.Username;
                     
-                    // Deduplicate by Username - if same username appears with different ConnectionIds, keep the latest
-                    if (!usersDict.ContainsKey(connectionUsername))
+                    // Deduplicate by UserId - if same user appears with different ConnectionIds, keep the latest
+                    var dedupeKey = string.IsNullOrWhiteSpace(connectionUserId) ? connectionUsername : connectionUserId;
+                    if (!usersDict.ContainsKey(dedupeKey))
                     {
                         _logger.LogDebug("Adding user to list: {Username} ({ConnectionId})", 
                             connectionUsername, connection.Key);
                         
-                        usersDict[connectionUsername] = new User
+                        usersDict[dedupeKey] = new User
                         {
                             ConnectionId = connection.Key,
                             Username = connectionUsername,
@@ -331,8 +360,8 @@ namespace Trivio.Hubs
                     }
                     else
                     {
-                        _logger.LogWarning("Duplicate username {Username} found in room {RoomCode} (ConnectionId: {ConnectionId}), keeping first occurrence", 
-                            connectionUsername, code, connection.Key);
+                        _logger.LogWarning("Duplicate user detected (UserId: {UserId}, Username: {Username}) in room {RoomCode} (ConnectionId: {ConnectionId}), keeping first occurrence", 
+                            connectionUserId, connectionUsername, code, connection.Key);
                     }
                 }
                 
@@ -367,12 +396,18 @@ namespace Trivio.Hubs
 
         public async Task StartTheGame(int code, int wordCount)
         {
+            var callerUserId = Context.User?.FindFirst("userId")?.Value;
+            if (string.IsNullOrWhiteSpace(callerUserId))
+            {
+                throw new HubException("Unauthorized");
+            }
+
             var room = _roomRegistry.GetRoom(code);
             if (room == null)
             {
                 throw new HubException("Room not found");
             }
-            if (!string.Equals(room.OwnerConnectionId, Context.ConnectionId, StringComparison.Ordinal))
+            if (!string.Equals(room.OwnerUserId, callerUserId, StringComparison.Ordinal))
             {
                 throw new HubException("Only the room owner can start the game");
             }
@@ -389,7 +424,6 @@ namespace Trivio.Hubs
             // Start with the first round of consonants
             await StartNewRound(code);
         }
-
         private async Task StartNewRound(int code)
         {
             var room = _roomRegistry.GetRoom(code);
@@ -415,7 +449,7 @@ namespace Trivio.Hubs
                 roundStartedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             });
         }
-
+        [Authorize(Roles = "player,admin")]
         public async Task SubmitGuess(GuessData guessData)
         {
             if (guessData == null || string.IsNullOrWhiteSpace(guessData.Guess) || 
@@ -525,20 +559,22 @@ namespace Trivio.Hubs
             }
 
             var codeKey = roomCode.ToString();
-            // Use a dictionary to deduplicate by Username (same user might have multiple ConnectionIds)
+            // Use a dictionary to deduplicate by UserId (same user might have multiple ConnectionIds)
             var usersDict = new Dictionary<string, User>();
 
             // Build user list from Room.Connections (synced via Redis) and GameUsers (for points)
             foreach (var connection in room.Connections)
             {
                 var username = connection.Value.Username;
+                var userId = connection.Value.UserId;
+                var dedupeKey = string.IsNullOrWhiteSpace(userId) ? username : userId;
                 
-                // Deduplicate by Username - keep the first occurrence if same username appears multiple times
-                if (!usersDict.ContainsKey(username))
+                // Deduplicate by UserId (fallback to username) - keep the first occurrence if same user appears multiple times
+                if (!usersDict.ContainsKey(dedupeKey))
                 {
                     var points = GetUserPoints(codeKey, username);
                     
-                    usersDict[username] = new User
+                    usersDict[dedupeKey] = new User
                     {
                         ConnectionId = connection.Key,
                         Username = username,
@@ -548,8 +584,8 @@ namespace Trivio.Hubs
                 }
                 else
                 {
-                    _logger.LogDebug("Skipping duplicate username {Username} in room {RoomCode} (ConnectionId: {ConnectionId})", 
-                        username, roomCode, connection.Key);
+                    _logger.LogDebug("Skipping duplicate user (UserId: {UserId}, Username: {Username}) in room {RoomCode} (ConnectionId: {ConnectionId})", 
+                        userId, username, roomCode, connection.Key);
                 }
             }
 
@@ -574,11 +610,19 @@ namespace Trivio.Hubs
             return 0;
         }
 
+        [Authorize(Roles = "admin")]
         [HubMethodName("CloseRoom")]
         public async Task CloseRoom(int code)
         {
             try
             {
+                var callerUserId = Context.User?.FindFirst("userId")?.Value;
+                if (string.IsNullOrWhiteSpace(callerUserId))
+                {
+                    await Clients.Caller.SendAsync("ServerMessage", "Unauthorized", "error");
+                    return;
+                }
+
                 var room = _roomRegistry.GetRoom(code);
                 if (room == null)
                 {
@@ -586,8 +630,8 @@ namespace Trivio.Hubs
                     return;
                 }
 
-                // Check if the caller is the room owner
-                if (room.OwnerConnectionId != Context.ConnectionId)
+                // Check if the caller is the room owner (by userId)
+                if (!string.Equals(room.OwnerUserId, callerUserId, StringComparison.Ordinal))
                 {
                     await Clients.Caller.SendAsync("ServerMessage", "Only room owner can close the room", "error");
                     return;
@@ -620,15 +664,22 @@ namespace Trivio.Hubs
             var groupName = data.Code.Trim();
             await Clients.OthersInGroup(groupName).SendAsync("ReceiveTypingInput", data.Username, data.Input);
         }
+        [Authorize(Roles = "admin")]
         [HubMethodName("KickUser")]
         public async Task KickUser(int code, string targetUsername)
         {
+            var callerUserId = Context.User?.FindFirst("userId")?.Value;
+            if (string.IsNullOrWhiteSpace(callerUserId))
+            {
+                throw new HubException("Unauthorized");
+            }
+
             var room = _roomRegistry.GetRoom(code);
             if (room == null)
             {
                 throw new HubException("Room not found");
             }
-            if (!string.Equals(room.OwnerConnectionId, Context.ConnectionId, StringComparison.Ordinal))
+            if (!string.Equals(room.OwnerUserId, callerUserId, StringComparison.Ordinal))
             {
                 throw new HubException("Only the room owner can kick users");
             }

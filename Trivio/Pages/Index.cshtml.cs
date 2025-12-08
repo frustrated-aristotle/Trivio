@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.Extensions.Logging;
 using Trivio.Enums;
+using Trivio.Models;
 using Trivio.Services;
 
 namespace Trivio.Pages
@@ -9,11 +11,16 @@ namespace Trivio.Pages
     {
         private readonly ILogger<IndexModel> _logger;
         private readonly IRoomRegistry _roomRegistry;
+        private readonly TokenService _tokenService;
 
-        public IndexModel(ILogger<IndexModel> logger, IRoomRegistry roomRegistry)
+        public IndexModel(
+            ILogger<IndexModel> logger,
+            IRoomRegistry roomRegistry,
+            TokenService tokenService)
         {
             _logger = logger;
             _roomRegistry = roomRegistry;
+            _tokenService = tokenService;
         }
 
         public void OnGet()
@@ -23,70 +30,116 @@ namespace Trivio.Pages
             _logger.LogInformation("Room infos: {RoomInfos}", roomInfos);
         }
 
-        public IActionResult OnPostStartGame(bool isAdmin, string role, string username, bool privateRoom = false, string? password = null)
+        public IActionResult OnPostStartGame(
+            bool isAdmin,
+            string role,
+            string username,
+            bool privateRoom = false,
+            string? password = null)
         {
             Console.WriteLine("username: " + username);
 
-            // Persist values for one redirect without exposing in URL
+            // Store some values for after redirect
             TempData["IsAdmin"] = isAdmin;
             TempData["Role"] = role;
             TempData["Username"] = username;
-            // Only store password if room is private and password is provided
-            if (privateRoom && !string.IsNullOrEmpty(password))
-            {
-                TempData["Password"] = password.Trim(); // Trim whitespace
-            }
 
-            // Generate code on server to keep flow consistent and tamper-proof
+            if (privateRoom && !string.IsNullOrEmpty(password))
+                TempData["Password"] = password.Trim();
+
+            // Generate room code
             var random = new Random();
             var code = random.Next(10000, 99999);
-            // Create room without binding an owner connection yet; owner set on first JoinRoom
+
             Enum.TryParse<Roles>(role, true, out var ownerRole);
-            _roomRegistry.CreateRoom(code, ownerConnectionId: string.Empty, ownerUsername: username ?? "Host", ownerRole: ownerRole == 0 ? Roles.Player : ownerRole, isPrivate: privateRoom, password: password);
+
+            // Create the room
+            _roomRegistry.CreateRoom(
+                code,
+                ownerConnectionId: string.Empty,
+                ownerUsername: username ?? "Host",
+                ownerRole: ownerRole == 0 ? Roles.Player : ownerRole,
+                isPrivate: privateRoom,
+                password: password
+            );
+
+            // Build claims DTO
+            var dto = new UserRoomClaimsDTO
+            {
+                RoomCode = code,
+                Username = username ?? "Host",
+                UserId = Guid.NewGuid().ToString(),
+                IsAdmin = isAdmin,
+                Role = ownerRole
+            };
+
+            // Generate JWT token
+            var token = _tokenService.CreateRoomToken(dto);
+
+            // Store token for GamePage
+            TempData["Token"] = token;
+
             return RedirectToPage("/GamePage", new { code });
         }
 
-        public IActionResult OnPostAttend(string role, int roomCode, string username, string? password = null)
+        public IActionResult OnPostAttend(
+            string role,
+            int roomCode,
+            string username,
+            string? password = null)
         {
             Console.WriteLine("username: " + username);
-            TempData["IsAdmin"] = false; // attending users are not admins
+
+            TempData["IsAdmin"] = false;
             TempData["Role"] = role;
             TempData["Username"] = username;
-            
-            // Validate room code lightly
-            var code = roomCode;
-            if (code < 10000 || code > 99999)
+
+            // Validate room code
+            if (roomCode < 10000 || roomCode > 99999)
             {
                 ModelState.AddModelError("roomCode", "Invalid room code.");
                 return Page();
             }
 
-            // Check if room exists and if it's private
-            var room = _roomRegistry.GetRoom(code);
+            var room = _roomRegistry.GetRoom(roomCode);
+
             if (room == null)
             {
                 ModelState.AddModelError("roomCode", "Room not found.");
                 return Page();
             }
 
-            // If room is private, validate password
+            // Check private password
             if (room.IsPrivate)
             {
-                var trimmedPassword = string.IsNullOrEmpty(password) ? null : password.Trim();
-                var trimmedRoomPassword = string.IsNullOrEmpty(room.Password) ? null : room.Password.Trim();
-                
-                if (string.IsNullOrEmpty(trimmedPassword) || trimmedPassword != trimmedRoomPassword)
+                var trimmedPassword = string.IsNullOrWhiteSpace(password) ? null : password.Trim();
+                var roomPassword = string.IsNullOrWhiteSpace(room.Password) ? null : room.Password.Trim();
+
+                if (trimmedPassword != roomPassword)
                 {
                     ModelState.AddModelError("password", "Invalid password for private room.");
                     TempData["ShowPasswordField"] = true;
                     return Page();
                 }
-                
-                // Store password in TempData so it can be used when joining via SignalR
+
                 TempData["Password"] = trimmedPassword;
             }
 
-            return RedirectToPage("/GamePage", new { code });
+            // Build claims DTO for attendee
+            var dto = new UserRoomClaimsDTO
+            {
+                RoomCode = roomCode,
+                Username = username,
+                UserId = Guid.NewGuid().ToString(),
+                IsAdmin = false,
+                Role = Roles.Player
+            };
+
+            // Generate token
+            var token = _tokenService.CreateRoomToken(dto);
+            TempData["Token"] = token;
+
+            return RedirectToPage("/GamePage", new { code = roomCode });
         }
     }
 }

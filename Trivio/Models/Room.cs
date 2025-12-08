@@ -11,12 +11,13 @@ namespace Trivio.Models
         public DateTime? ExpiresAtUtc { get; set; }
         public int Capacity { get; set; } = 8;
         public string? OwnerConnectionId { get; set; }
+        public string? OwnerUserId { get; set; }
         public Roles OwnerRole { get; set; } = Roles.Player;
         public bool IsPrivate { get; set; } = false;
         public string? Password { get; set; }
         // Read-only Connections dictionary (used at runtime)
         [JsonIgnore]
-        public ConcurrentDictionary<string, (string Username, Roles Role)> Connections { get; } = new();
+        public ConcurrentDictionary<string, (string UserId, string Username, Roles Role)> Connections { get; } = new();
         
         // Serializable property for Connections (used for Redis serialization)
         [JsonPropertyName("connections")]
@@ -26,7 +27,7 @@ namespace Trivio.Models
             {
                 return Connections.ToDictionary(
                     kvp => kvp.Key, 
-                    kvp => new ConnectionInfo { Username = kvp.Value.Username, Role = kvp.Value.Role }
+                    kvp => new ConnectionInfo { UserId = kvp.Value.UserId, Username = kvp.Value.Username, Role = kvp.Value.Role }
                 );
             }
             set
@@ -36,7 +37,7 @@ namespace Trivio.Models
                 {
                     foreach (var kvp in value)
                     {
-                        Connections[kvp.Key] = (kvp.Value.Username, kvp.Value.Role);
+                        Connections[kvp.Key] = (kvp.Value.UserId, kvp.Value.Username, kvp.Value.Role);
                     }
                 }
             }
@@ -60,6 +61,7 @@ namespace Trivio.Models
     // Helper class for serializing connections
     public class ConnectionInfo
     {
+        public string UserId { get; set; } = string.Empty;
         public string Username { get; set; } = string.Empty;
         public Roles Role { get; set; }
     }

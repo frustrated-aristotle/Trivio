@@ -14,7 +14,7 @@ namespace Trivio.Pages
         public Roles Role { get; set; }
         public string Username { get; set; } = string.Empty;
         public string? Password { get; set; }
-        
+        public string Token { get; set; } = string.Empty;
         public void OnGet(int code)
         {
             Code = code;
@@ -37,7 +37,9 @@ namespace Trivio.Pages
             {
                 Username = "Guest"; // Default username if none provided
             }
-            
+
+            Token = TempData["Token"].ToString();
+
             // Read password if provided (for private rooms)
             if (TempData.ContainsKey("Password"))
             {

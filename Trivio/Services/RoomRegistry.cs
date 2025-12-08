@@ -38,7 +38,9 @@ namespace Trivio.Services
             // (When called from server-side POST, connectionId is empty and will be set on JoinRoom)
             if (!string.IsNullOrEmpty(ownerConnectionId))
             {
-                room.Connections[ownerConnectionId] = (ownerUsername, ownerRole);
+                var ownerUserId = ownerConnectionId;
+                room.Connections[ownerConnectionId] = (ownerUserId, ownerUsername, ownerRole);
+                room.OwnerUserId = ownerUserId;
                 _logger.LogInformation("Added connection {ConnectionId} for user {Username} during room creation", 
                     ownerConnectionId, ownerUsername);
             }
@@ -99,7 +101,7 @@ namespace Trivio.Services
             return room;
         }
 
-        public bool TryAddConnection(int code, string connectionId, string username, string? password, Roles role, bool isAdmin, out string? reason)
+        public bool TryAddConnection(int code, string connectionId, string userId, string username, string? password, Roles role, bool isAdmin, out string? reason)
         {
             reason = null;
             
@@ -118,25 +120,25 @@ namespace Trivio.Services
                 return false;
             }
 
-            // FIRST: Remove any old connections for the same username (handle reconnection scenario)
+            // FIRST: Remove any old connections for the same userId (handle reconnection scenario)
             // This prevents the same user from appearing multiple times with different ConnectionIds
             // Do this BEFORE checking if the current connectionId exists
             var connectionsToRemove = room.Connections
-                .Where(kvp => kvp.Value.Username == username && kvp.Key != connectionId)
+                .Where(kvp => kvp.Value.UserId == userId && kvp.Key != connectionId)
                 .Select(kvp => kvp.Key)
                 .ToList();
 
             if (connectionsToRemove.Any())
             {
-                _logger.LogInformation("Found {Count} old connection(s) for user {Username} in room {RoomCode}, removing them", 
-                    connectionsToRemove.Count, username, code);
+                _logger.LogInformation("Found {Count} old connection(s) for user {UserId} in room {RoomCode}, removing them", 
+                    connectionsToRemove.Count, userId, code);
             }
 
             foreach (var oldConnectionId in connectionsToRemove)
             {
                 room.Connections.TryRemove(oldConnectionId, out _);
-                _logger.LogInformation("Removed old connection {OldConnectionId} for user {Username} in room {RoomCode} (new connection: {NewConnectionId})", 
-                    oldConnectionId, username, code, connectionId);
+                _logger.LogInformation("Removed old connection {OldConnectionId} for user {UserId} in room {RoomCode} (new connection: {NewConnectionId})", 
+                    oldConnectionId, userId, code, connectionId);
             }
 
             // Check if connection already exists (avoid duplicates)
@@ -144,10 +146,10 @@ namespace Trivio.Services
             {
                 // Connection already exists, just update the username/role if different
                 var existing = room.Connections[connectionId];
-                if (existing.Username != username || existing.Role != role)
+                if (existing.UserId != userId || existing.Username != username || existing.Role != role)
                 {
-                    room.Connections[connectionId] = (username, role);
-                    _logger.LogInformation("Updated existing connection {ConnectionId} in room {RoomCode}", connectionId, code);
+                    room.Connections[connectionId] = (userId, username, role);
+                    _logger.LogInformation("Updated existing connection {ConnectionId} for user {UserId} in room {RoomCode}", connectionId, userId, code);
                 }
                 else
                 {
@@ -208,7 +210,7 @@ namespace Trivio.Services
                 _logger.LogInformation("Password validated successfully for private room {RoomCode}", code);
             }
             // Add connection to room
-            room.Connections[connectionId] = (username, role);
+            room.Connections[connectionId] = (userId, username, role);
 
             // Update memory cache
             _rooms[code] = room;
