@@ -17,13 +17,21 @@ public class TokenService
 
     public string CreateRoomToken(UserRoomClaimsDTO dto)
     {
+        // Ensure all values are non-null
+        var roomCode = dto.RoomCode.ToString();
+        var username = dto.Username ?? "Guest";
+        var userId = dto.UserId ?? Guid.NewGuid().ToString();
+        var roleString = dto.Role.ToString();
+        
         var claims = new List<Claim>
         {
-            new Claim("room", dto.RoomCode.ToString()),
-            new Claim("username", dto.Username),
-            new Claim("userId", dto.UserId),
+            new Claim("room", roomCode),
+            new Claim("username", username),
+            new Claim("userId", userId),
             new Claim("isAdmin", dto.IsAdmin.ToString()),
-            new Claim("role", dto.Role.ToString())
+            new Claim("role", roleString), // Game role (Player, Spectator, etc.)
+            // Add proper Role claim for ASP.NET Core authorization
+            new Claim(ClaimTypes.Role, dto.IsAdmin ? "admin" : "player")
         };
 
         var key = new SymmetricSecurityKey(

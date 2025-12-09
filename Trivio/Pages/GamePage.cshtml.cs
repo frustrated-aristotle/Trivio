@@ -38,7 +38,7 @@ namespace Trivio.Pages
                 Username = "Guest"; // Default username if none provided
             }
 
-            Token = TempData["Token"].ToString();
+            Token = TempData["Token"]?.ToString() ?? string.Empty;
 
             // Read password if provided (for private rooms)
             if (TempData.ContainsKey("Password"))

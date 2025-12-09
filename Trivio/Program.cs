@@ -6,6 +6,7 @@ using StackExchange.Redis;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using System.Security.Claims;
 using Trivio.Options;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -58,6 +59,8 @@ builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 builder.Services.AddSingleton<IRoomRegistry, RoomRegistry>();
 builder.Services.AddSingleton<RoomValidationFilter>();
 builder.Services.AddSingleton<IWordService, WordService>();
+builder.Services.AddSingleton<IGameHub, GameHub>();
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -80,27 +83,71 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidAudience = audience,
             IssuerSigningKey = key,
 
-            ClockSkew = TimeSpan.FromMinutes(5)
+            ClockSkew = TimeSpan.FromMinutes(5),
+            // Don't throw on authentication failure - let SignalR handle it
+            RequireExpirationTime = true,
+            // Map the Role claim correctly for authorization
+            RoleClaimType = ClaimTypes.Role
         };
-
+        
+        // Configure events
         options.Events = new JwtBearerEvents
         {
             OnMessageReceived = context =>
             {
-                var token = context.Request.Query["access_token"];
-
-                if (!string.IsNullOrEmpty(token) &&
-                    context.Request.Path.StartsWithSegments("/gameHub"))
+                // Only process SignalR hub requests
+                var path = context.Request.Path;
+                if (path.StartsWithSegments("/gameHub"))
                 {
-                    context.Token = token;
+                    // Check query string first (for WebSocket/LongPolling connections)
+                    var token = context.Request.Query["access_token"].ToString();
+                    
+                    // If not in query string, check Authorization header
+                    if (string.IsNullOrEmpty(token))
+                    {
+                        var authHeader = context.Request.Headers["Authorization"].ToString();
+                        if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                        {
+                            token = authHeader.Substring("Bearer ".Length).Trim();
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(token))
+                    {
+                        context.Token = token;
+                    }
                 }
 
+                return Task.CompletedTask;
+            },
+            OnChallenge = context =>
+            {
+                // For SignalR, don't challenge - let it proceed and check auth in methods
+                if (context.Request.Path.StartsWithSegments("/gameHub"))
+                {
+                    context.HandleResponse();
+                    return Task.CompletedTask;
+                }
+                return Task.CompletedTask;
+            },
+            OnAuthenticationFailed = context =>
+            {
+                // Log authentication failures for debugging
+                var logger = context.HttpContext.RequestServices.GetService<ILogger<Program>>();
+                logger?.LogWarning("JWT authentication failed: {Exception}", context.Exception.Message);
                 return Task.CompletedTask;
             }
         };
     });
 builder.Services.AddSingleton<TokenService>();
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    // Allow SignalR negotiation to proceed, but require auth for hub methods
+    options.AddPolicy("SignalRHubPolicy", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+    });
+});
 
 var app = builder.Build();
 
@@ -119,7 +166,7 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Map SignalR hub
+// Map SignalR hub - methods will check auth manually
 app.MapHub<GameHub>("/gameHub");
 
 

@@ -14,6 +14,7 @@ namespace Trivio.Services
         void UpdateRoomState(Room room);
         Room? RefreshRoomFromRedis(int code);
         List<RoomInfo> GetRoomInfos();
+        List<Room> GetAllOpenRooms();
     }
 }
 

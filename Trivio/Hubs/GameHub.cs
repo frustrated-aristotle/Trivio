@@ -3,8 +3,8 @@ using Microsoft.AspNetCore.SignalR;
 using Trivio.Enums;
 using Trivio.Models;
 using Trivio.Services;
-using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
+using System.Reflection.Metadata.Ecma335;
 
 namespace Trivio.Hubs
 {
@@ -16,6 +16,7 @@ namespace Trivio.Hubs
         public string ConnectionId { get; set; } = string.Empty;
         public string Username { get; set; } = string.Empty; // Önemli: Gerçek ad
         public string Role { get; set; } = string.Empty;     // player veya spectator
+        public string Status { get; set; } = "online";
         public int Points { get; set; } = 0; // User's total points
     }
 
@@ -38,9 +39,8 @@ namespace Trivio.Hubs
         public string Input { get; set; } = string.Empty;
         public string Code { get; set; } = string.Empty;
     }
-    [Authorize]
-    [Authorize]
-    public class GameHub : Hub
+    // Don't require auth at hub level - allow negotiation, check auth in methods
+    public class GameHub : Hub, IGameHub
     {
         private readonly IRoomRegistry _roomRegistry;
         private readonly IWordService _wordService;
@@ -55,6 +55,80 @@ namespace Trivio.Hubs
 
         public static readonly Dictionary<string, List<User>> GameUsers = new();
 
+        public async Task AddUserToLobby()
+        {
+            _logger.LogInformation("Connectionid is : {ConnectionId}", Context.ConnectionId);
+            await Groups.AddToGroupAsync(Context.ConnectionId, "lobby");
+            
+            // Send current list of open rooms to the newly joined user
+            try
+            {
+                var openRooms = _roomRegistry.GetAllOpenRooms();
+                var roomsData = openRooms.Select(room => BuildRoomDataForLobby(room)).ToList();
+                
+                await Clients.Caller.SendAsync("InitialRoomsList", roomsData);
+                _logger.LogInformation("Sent {RoomCount} open rooms to new lobby member {ConnectionId}", roomsData.Count, Context.ConnectionId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending initial rooms list to lobby member {ConnectionId}", Context.ConnectionId);
+            }
+        }
+        
+        // Helper method to build room data for lobby broadcasts
+        private object BuildRoomDataForLobby(Room room)
+        {
+            // Get host name from connections
+            string hostName = "Unknown";
+            if (room.Connections.Any())
+            {
+                // Try to find owner first
+                if (!string.IsNullOrEmpty(room.OwnerUserId))
+                {
+                    var ownerConnection = room.Connections.FirstOrDefault(c => c.Value.UserId == room.OwnerUserId);
+                    if (ownerConnection.Value.Username != null)
+                    {
+                        hostName = ownerConnection.Value.Username;
+                    }
+                }
+                
+                // Fallback to first connection if owner not found
+                if (hostName == "Unknown")
+                {
+                    hostName = room.Connections.First().Value.Username ?? "Unknown";
+                }
+            }
+            
+            return new
+            {
+                code = room.Code,
+                hostName = hostName,
+                playerCount = room.Connections.Count,
+                capacity = room.Capacity,
+                isPrivate = room.IsPrivate,
+                gameStarted = room.GameStarted,
+                createdAt = room.CreatedAtUtc.ToString("O") // ISO 8601 format
+            };
+        }
+        
+        // Helper method to broadcast room update to lobby
+        private async Task BroadcastRoomUpdateToLobby(int roomCode)
+        {
+            try
+            {
+                var room = _roomRegistry.GetRoom(roomCode);
+                if (room != null && !room.IsClosed)
+                {
+                    var roomData = BuildRoomDataForLobby(room);
+                    await Clients.Group("lobby").SendAsync("RoomUpdated", roomData);
+                    _logger.LogInformation("Broadcasted room update to lobby for room {RoomCode}", roomCode);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error broadcasting room update to lobby for room {RoomCode}", roomCode);
+            }
+        }
         public override async Task OnConnectedAsync()
         {
             _logger.LogInformation("Client connected: {ConnectionId}", Context.ConnectionId);
@@ -111,6 +185,14 @@ namespace Trivio.Hubs
                 {
                     await Clients.Group(roomCode.ToString()).SendAsync("UserLeft", Context.ConnectionId);
                     await SendUpdatedUserList(roomCode);
+                    
+                    // Broadcast room update to lobby
+                    await BroadcastRoomUpdateToLobby(roomCode);
+                }
+                else if (room == null || room.IsClosed)
+                {
+                    // Room was closed or removed, notify lobby
+                    await Clients.Group("lobby").SendAsync("RoomClosed", roomCode);
                 }
             }
             
@@ -171,6 +253,9 @@ namespace Trivio.Hubs
                 await Clients.Group(roomCode.ToString()).SendAsync("RoomClosed", new {
                     message = "Room closed - no players remaining"
                 });
+                
+                // Broadcast room closed to lobby
+                await Clients.Group("lobby").SendAsync("RoomClosed", roomCode);
                 
                 // Clean up the room after a delay
                 _ = Task.Delay(5000).ContinueWith(async _ => {
@@ -291,6 +376,7 @@ namespace Trivio.Hubs
                         ConnectionId = connection.Key,
                         Username = connection.Value.Username,
                         Role = connection.Value.Role.ToString().ToLower(),
+                        Status = "online",
                         Points = GetUserPoints(code.ToString(), connection.Value.UserId, connection.Value.Username)
                     });
                 }
@@ -360,6 +446,7 @@ namespace Trivio.Hubs
                             ConnectionId = connection.Key,
                             Username = connectionUsername,
                             Role = connection.Value.Role.ToString().ToLower(),
+                            Status = "online",
                             Points = GetUserPoints(codeKey, connectionUserId, connectionUsername)
                         };
                     }
@@ -378,6 +465,9 @@ namespace Trivio.Hubs
                 
                 // Send updated user list to ALL users in the room (including cross-server users)
                 await SendUpdatedUserList(code);
+                
+                // Broadcast room update to lobby
+                await BroadcastRoomUpdateToLobby(code);
                 
                 await Clients.Caller.SendAsync("JoinSuccess", code, role);
                 
@@ -425,6 +515,9 @@ namespace Trivio.Hubs
 
             // Save game state to Redis so other servers can see it
             _roomRegistry.UpdateRoomState(room);
+            
+            // Broadcast room status change to lobby
+            await Clients.Group("lobby").SendAsync("RoomStatusChanged", code, "In Game");
 
             // Start with the first round of consonants
             await StartNewRound(code);
@@ -585,6 +678,7 @@ namespace Trivio.Hubs
                         ConnectionId = connection.Key,
                         Username = username,
                         Role = connection.Value.Role.ToString().ToLower(),
+                        Status = "online",
                         Points = points
                     };
                 }
@@ -623,6 +717,7 @@ namespace Trivio.Hubs
             try
             {
                 var callerUserId = Context.User?.FindFirst("userId")?.Value;
+                _logger.LogInformation("Role: " + Context.User?.FindFirst("role")?.Value);
                 if (string.IsNullOrWhiteSpace(callerUserId))
                 {
                     await Clients.Caller.SendAsync("ServerMessage", "Unauthorized", "error");
@@ -653,6 +748,9 @@ namespace Trivio.Hubs
                     message = "Room has been closed by the owner",
                     closedBy = "owner"
                 });
+                
+                // Broadcast room closed to lobby
+                await Clients.Group("lobby").SendAsync("RoomClosed", code);
 
                 _logger.LogInformation("Room {RoomCode} closed by owner {ConnectionId}", code, Context.ConnectionId);
             }
@@ -708,24 +806,9 @@ namespace Trivio.Hubs
             await Groups.RemoveFromGroupAsync(target.ConnectionId, codeKey);
             await Clients.Client(target.ConnectionId).SendAsync("Kicked");
             await Clients.Group(codeKey).SendAsync("UserKicked", new { userId = target.UserId, username = target.Username });
-        }
-        [HubMethodName("SendMessage")]
-        public async Task SendMessage(int code,string senderUsername, string message)
-        {
-            var room = _roomRegistry.GetRoom(code);
-            List<string> data = new List<string> {senderUsername, message };
-            if(room == null)
-            {
-                throw new HubException("Room not found");
-            }
-            var codeKey = code.ToString();
             
-            await Clients.Group(codeKey).SendAsync("MessageReceived", new
-            {
-                _code = code,
-                username = senderUsername,
-                msg = message
-            });
+            // Broadcast room update to lobby
+            await BroadcastRoomUpdateToLobby(code);
         }
         
         public async Task LeaveRoom(int code)

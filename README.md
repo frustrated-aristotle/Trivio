@@ -486,6 +486,10 @@ Trivio/
 - **Pause / Resume by owner** (and requested by users)
 - **More analytics** (e.g., Redis-based metrics or live dashboards)
 - **Additional real-time features** like in-game chat or presence indicators
+ 
+## 📢 Do We Need IHubContext?
+
+Not for the current design. All real-time messaging stays inside `GameHub` using `Clients`/`Groups`, and state is coordinated through `RoomRegistry` (Redis). `IHubContext<T>` is only needed when **pushing messages from outside the hub** (e.g., background services, controllers, schedulers). If you ever add a server-driven notification (like auto-closing rooms or admin dashboards), you can inject `IHubContext<GameHub>` into that service. For this portfolio scope, omitting it keeps the code lean and focused.
 
 These would extend the existing SignalR + Redis foundation and are natural next steps for the project.
 

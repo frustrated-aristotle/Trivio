@@ -13,15 +13,30 @@ namespace Trivio.Filters
             _roomRegistry = roomRegistry;
         }
 
-        public async ValueTask<object> InvokeMethodAsync(HubInvocationContext ctx, Func<HubInvocationContext, ValueTask<object>> next)
+        public async ValueTask<object?> InvokeMethodAsync(HubInvocationContext ctx, Func<HubInvocationContext, ValueTask<object?>> next)
         {
-            if(ctx.HubMethodName=="SubmitGuess")
+            if (ctx.HubMethodName == "SubmitGuess")
             {
-                GuessData guessData = ctx.HubMethodArguments[0] as GuessData;
-                string roomCode = guessData.Code;
-                string word = guessData.Guess;
-                var room = _roomRegistry.GetRoom(Int32.Parse(roomCode));
-                if(room.WordList.Contains(word))
+                if (ctx.HubMethodArguments.Count == 0 || ctx.HubMethodArguments[0] is not GuessData guessData)
+                {
+                    return await next(ctx);
+                }
+
+                var roomCode = guessData.Code;
+                var word = guessData.Guess;
+
+                if (string.IsNullOrWhiteSpace(roomCode) || string.IsNullOrWhiteSpace(word))
+                {
+                    return await next(ctx);
+                }
+
+                if (!int.TryParse(roomCode, out var parsedCode))
+                {
+                    return await next(ctx);
+                }
+
+                var room = _roomRegistry.GetRoom(parsedCode);
+                if (room != null && room.WordList != null && room.WordList.Contains(word))
                 {
                     return new { error = "Submitted already" };
                 }

@@ -568,6 +568,12 @@ namespace Trivio.Services
                 Connections = r.Connections.Count
             }).ToList();
         }
+        
+        public List<Room> GetAllOpenRooms()
+        {
+            // Return all rooms that are not closed
+            return _rooms.Values.Where(r => !r.IsClosed).ToList();
+        }
 #endregion
     }
 }

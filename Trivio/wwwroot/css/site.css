@@ -151,3 +151,48 @@ p {
   font-weight: 500;
   color: #4b5563;
 }
+
+/* Open Rooms Section */
+.trivio-open-rooms {
+  margin-top: 4rem;
+}
+
+.trivio-open-rooms-header h2 {
+  color: #111827;
+}
+
+.trivio-room-card {
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 1rem;
+  transition: all 0.2s ease;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.trivio-room-card:hover {
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.15);
+  transform: translateY(-2px);
+}
+
+.trivio-room-card .card-body {
+  padding: 1.25rem;
+}
+
+.trivio-room-card .card-title {
+  font-size: 1.1rem;
+  color: #111827;
+}
+
+.trivio-room-card .badge {
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.35rem 0.65rem;
+}
+
+.trivio-empty-state {
+  padding: 3rem 1rem;
+  background: #ffffff;
+  border-radius: 1rem;
+  border: 1px dashed rgba(148, 163, 184, 0.5);
+}
