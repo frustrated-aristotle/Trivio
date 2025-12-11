@@ -19,6 +19,7 @@ builder.Services.AddSignalR(options =>
     { 
         options.AddFilter<RoomValidationFilter>();
         options.AddFilter<WordRepeatValidationFilter>();
+        options.AddFilter<RateLimitFilter>();
         options.EnableDetailedErrors = builder.Environment.IsDevelopment();
         options.KeepAliveInterval = TimeSpan.FromSeconds(15);
         options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
