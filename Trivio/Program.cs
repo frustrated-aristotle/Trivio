@@ -59,6 +59,8 @@ builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 
 builder.Services.AddSingleton<IRoomRegistry, RoomRegistry>();
 builder.Services.AddSingleton<RoomValidationFilter>();
+builder.Services.AddSingleton<WordRepeatValidationFilter>();
+builder.Services.AddSingleton<RateLimitFilter>();
 builder.Services.AddSingleton<IWordService, WordService>();
 builder.Services.AddSingleton<IGameHub, GameHub>();
 

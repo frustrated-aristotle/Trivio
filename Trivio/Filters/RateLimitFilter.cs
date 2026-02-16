@@ -28,40 +28,43 @@ namespace Trivio.Filters
             HubInvocationContext invocationContext,
             Func<HubInvocationContext, ValueTask<object?>> next)
         {
-            // Identify caller and scope the key.
-            var userId = invocationContext.Context.User?.FindFirst("userId")?.Value
-                         ?? invocationContext.Context.ConnectionId
-                         ?? "anonymous";
             var method = invocationContext.HubMethodName ?? "unknown";
-            var roomSegment = GetRoomSegment(invocationContext);
-            var key = $"ratelimit:{method}:{roomSegment}:{userId}";
-
-            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var cutoff = nowMs - (long)Window.TotalMilliseconds;
-
-            try
+            if(method == "SubmitGuess")
             {
-                await _database.SortedSetAddAsync(key, nowMs.ToString(), nowMs, When.Always);
-                await _database.SortedSetRemoveRangeByScoreAsync(key, double.NegativeInfinity, cutoff);
-                var count = await _database.SortedSetLengthAsync(key);
-                await _database.KeyExpireAsync(key, KeyTtl);
+                // Identify caller and scope the key.
+                var userId = invocationContext.Context.User?.FindFirst("userId")?.Value
+                            ?? invocationContext.Context.ConnectionId
+                            ?? "anonymous";
+                var roomSegment = GetRoomSegment(invocationContext);
+                var key = $"ratelimit:{method}:{roomSegment}:{userId}";
 
-                if (count > MaxHitsPerWindow)
+                var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                var cutoff = nowMs - (long)Window.TotalMilliseconds;
+
+                try
                 {
-                    _logger.LogWarning(
-                        "Rate limit exceeded for user {UserId} on {Method} {RoomSegment}: {Count} hits in {WindowMs}ms",
-                        userId, method, roomSegment, count, Window.TotalMilliseconds);
-                    throw new HubException("Too many requests, please slow down.");
+                    await _database.SortedSetAddAsync(key, nowMs.ToString(), nowMs, When.Always);
+                    await _database.SortedSetRemoveRangeByScoreAsync(key, double.NegativeInfinity, cutoff);
+                    var count = await _database.SortedSetLengthAsync(key);
+                    await _database.KeyExpireAsync(key, KeyTtl);
+
+                    if (count > MaxHitsPerWindow)
+                    {
+                        _logger.LogWarning(
+                            "Rate limit exceeded for user {UserId} on {Method} {RoomSegment}: {Count} hits in {WindowMs}ms",
+                            userId, method, roomSegment, count, Window.TotalMilliseconds);
+                        throw new HubException("Too many requests, please slow down.");
+                    }
                 }
-            }
-            catch (HubException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                // Fail-open with a warning to avoid blocking the method if Redis is unavailable.
-                _logger.LogWarning(ex, "RateLimitFilter failed for user {UserId} on {Method}", userId, method);
+                catch (HubException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Fail-open with a warning to avoid blocking the method if Redis is unavailable.
+                    _logger.LogWarning(ex, "RateLimitFilter failed for user {UserId} on {Method}", userId, method);
+                }
             }
 
             return await next(invocationContext);
