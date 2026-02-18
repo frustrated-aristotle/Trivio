@@ -15,6 +15,12 @@ namespace Trivio.Services
             _filePath = Path.Combine(env.WebRootPath, "data", "tr_words.csv");
         }
 
+        // Test-friendly constructor: allows injecting a specific words file path
+        public WordService(string wordsFilePath)
+        {
+            _filePath = wordsFilePath;
+        }
+
         public async Task<List<string>> GetRandomWords(int count)
         {
             // Guard: non-positive requests yield empty list
@@ -101,7 +107,7 @@ namespace Trivio.Services
             return shuffled.Take(count).ToList();
         }
 
-        public bool IsValidWord(string word, List<char> allowedConsonants)
+        public bool HasAllowedConsonants(string word, List<char> allowedConsonants)
         {
             if (string.IsNullOrWhiteSpace(word))
                 return false;

@@ -569,7 +569,7 @@ namespace Trivio.Hubs
             var word = guessData.Guess.Trim().ToLower();
 
             // Check if word uses only allowed consonants
-            if (!_wordService.IsValidWord(word, room.CurrentConsonants))
+            if (!_wordService.HasAllowedConsonants(word, room.CurrentConsonants))
             {
                 await Clients.Caller.SendAsync("GuessResult", new { 
                     success = false, 

@@ -5,7 +5,7 @@
         Task<List<string>> ReadAllWordsFromFileAsync();
         Task<List<string>> GetRandomWords(int count);
         List<char> GetRandomConsonants(int count);
-        bool IsValidWord(string word, List<char> allowedConsonants);
+        bool HasAllowedConsonants(string word, List<char> allowedConsonants);
         Task<bool> WordExistsInDictionary(string word);
     }
 }
